@@ -1,6 +1,7 @@
 /vendor/
 /node_modules/
 /.phpunit.cache/
+.env
 /coverage/
 /.idea/
 /.vscode/
