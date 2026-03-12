@@ -85,25 +85,19 @@ class PayloadFactory
 
         // Template desteği
         if ($headers->has('X-SwMailerPro-Template')) {
-            $templateHeader = $headers->get('X-SwMailerPro-Template');
-            if ($templateHeader !== null) {
-                $payload['template_id'] = $templateHeader->getBodyAsString();
-                $headers->remove('X-SwMailerPro-Template');
-            }
+            $payload['template_id'] = $headers->get('X-SwMailerPro-Template')->getBodyAsString();
+            $headers->remove('X-SwMailerPro-Template');
 
             if ($headers->has('X-SwMailerPro-Data')) {
-                $dataHeader = $headers->get('X-SwMailerPro-Data');
-                if ($dataHeader !== null) {
-                    $json = $dataHeader->getBodyAsString();
-                    try {
-                        $payload['template_data'] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-                    } catch (\JsonException $e) {
-                        throw new SwMailerProException(
-                            "SwMailerPro: template_data geçersiz JSON — {$e->getMessage()}"
-                        );
-                    }
-                    $headers->remove('X-SwMailerPro-Data');
+                $json = $headers->get('X-SwMailerPro-Data')->getBodyAsString();
+                try {
+                    $payload['template_data'] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+                } catch (\JsonException $e) {
+                    throw new SwMailerProException(
+                        "SwMailerPro: template_data geçersiz JSON — {$e->getMessage()}"
+                    );
                 }
+                $headers->remove('X-SwMailerPro-Data');
             }
 
             // Template kullanılıyorsa content opsiyonel
@@ -114,23 +108,17 @@ class PayloadFactory
 
         // Campaign ID
         if ($headers->has('X-SwMailerPro-Campaign')) {
-            $campaignHeader = $headers->get('X-SwMailerPro-Campaign');
-            if ($campaignHeader !== null) {
-                $payload['campaign_id'] = $campaignHeader->getBodyAsString();
-                $headers->remove('X-SwMailerPro-Campaign');
-            }
+            $payload['campaign_id'] = $headers->get('X-SwMailerPro-Campaign')->getBodyAsString();
+            $headers->remove('X-SwMailerPro-Campaign');
         }
 
         // Transactional flag
         if ($headers->has('X-SwMailerPro-Transactional')) {
-            $transactionalHeader = $headers->get('X-SwMailerPro-Transactional');
-            if ($transactionalHeader !== null) {
-                $payload['transactional'] = filter_var(
-                    $transactionalHeader->getBodyAsString(),
-                    FILTER_VALIDATE_BOOLEAN
-                );
-                $headers->remove('X-SwMailerPro-Transactional');
-            }
+            $payload['transactional'] = filter_var(
+                $headers->get('X-SwMailerPro-Transactional')->getBodyAsString(),
+                FILTER_VALIDATE_BOOLEAN
+            );
+            $headers->remove('X-SwMailerPro-Transactional');
         }
 
         return $payload;

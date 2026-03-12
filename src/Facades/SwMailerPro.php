@@ -17,10 +17,10 @@ use SabahWeb\SwMailerPro\Client\SwMailerProClient;
  *   SwMailerPro::sendTest($payload)   — dry-run doğrulama
  *   SwMailerPro::health()             — gateway sağlık kontrolü
  *
- * @method static array<string, mixed> send(array<string, mixed> $payload) Senkron mail gönderimi (POST /api/v1/email/send)
- * @method static array<string, mixed> sendAsync(array<string, mixed> $payload) Asenkron gönderim (POST /api/v1/email/send-async)
- * @method static array<string, mixed> sendTest(array<string, mixed> $payload) Dry-run test (POST /api/v1/email/send-test)
- * @method static array<string, mixed> health() Gateway sağlık durumu (GET /api/v1/health)
+ * @method static array send(array $payload) Senkron mail gönderimi (POST /api/v1/email/send)
+ * @method static array sendAsync(array $payload) Asenkron gönderim (POST /api/v1/email/send-async)
+ * @method static array sendTest(array $payload) Dry-run test (POST /api/v1/email/send-test)
+ * @method static array health() Gateway sağlık durumu (GET /api/v1/health)
  *
  * @see SwMailerProClient
  */

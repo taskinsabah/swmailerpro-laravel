@@ -6,9 +6,6 @@ use Illuminate\Http\Client\Response;
 
 class ApiException extends SwMailerProException
 {
-    /**
-     * @param array<string, mixed>|null $errorBody
-     */
     public function __construct(
         string $message,
         public readonly string $errorCode,

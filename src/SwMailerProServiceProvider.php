@@ -50,8 +50,7 @@ class SwMailerProServiceProvider extends ServiceProvider
 
         // Mail transport kaydı
         Mail::extend('swmailerpro', function (array $config) {
-            /** @var array<string, mixed> $swConfig */
-            $swConfig = config('swmailerpro');
+            $swConfig = $this->app['config']['swmailerpro'];
 
             $url = $config['url'] ?? $swConfig['url'] ?? '';
             $key = $config['key'] ?? $swConfig['key'] ?? '';

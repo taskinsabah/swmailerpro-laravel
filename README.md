@@ -251,18 +251,6 @@ class WelcomeMail extends Mailable implements ShouldQueue
 
 > **Not:** Facade kullanımında (`SwMailerPro::send()`) queue yönetimi sizin sorumluluğunuzdadır. Laravel Job içinde sarabilirsiniz.
 
-> **Windows Kullanıcıları:** Laravel'in `queue:work` komutu `pcntl` PHP eklentisine bağımlıdır ve bu eklenti Windows'ta mevcut değildir. Windows ortamında queue kullanıyorsanız:
->
-> - `queue:work` yerine `queue:listen` kullanın — daha yavaş ama Windows uyumludur:
->   ```bash
->   php artisan queue:listen --tries=3
->   ```
-> - Alternatif olarak queue driver'ı `sync` yaparak işleri senkron çalıştırabilirsiniz (geliştirme ortamı için):
->   ```env
->   QUEUE_CONNECTION=sync
->   ```
-> - Production Windows sunucularında [Laravel Horizon](https://laravel.com/docs/horizon) **desteklenmez**. WSL2 (Windows Subsystem for Linux) üzerinde çalıştırmanız önerilir.
-
 ---
 
 ## Artisan Komutları

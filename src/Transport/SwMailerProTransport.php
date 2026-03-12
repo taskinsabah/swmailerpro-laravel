@@ -8,7 +8,6 @@ use SabahWeb\SwMailerPro\Events\EmailSent;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
-use Symfony\Component\Mime\Message;
 use Symfony\Component\Mime\MessageConverter;
 
 /**
@@ -31,13 +30,7 @@ class SwMailerProTransport extends AbstractTransport
 
     protected function doSend(SentMessage $message): void
     {
-        $originalMessage = $message->getOriginalMessage();
-
-        if (! $originalMessage instanceof Message) {
-            throw new \RuntimeException('SwMailerPro: Desteklenmeyen mesaj tipi — Message instance bekleniyor.');
-        }
-
-        $email = MessageConverter::toEmail($originalMessage);
+        $email = MessageConverter::toEmail($message->getOriginalMessage());
 
         $from = $email->getFrom();
         $to = $email->getTo();

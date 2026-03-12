@@ -17,10 +17,9 @@ class TestCommand extends Command
 
     protected $description = 'SwMailerPro üzerinden test e-postası gönderir';
 
-    public function handle(SwMailerProClient $client, PayloadFactory $factory): int
+    public function handle(SwMailerProClient $client): int
     {
-        $toOption = $this->option('to');
-        $to = is_string($toOption) ? $toOption : '';
+        $to = $this->option('to');
 
         if (empty($to)) {
             $this->error('--to parametresi zorunludur.');
@@ -32,18 +31,16 @@ class TestCommand extends Command
             return self::FAILURE;
         }
 
-        $fromOption = $this->option('from');
-        $from = is_string($fromOption) && $fromOption !== '' ? $fromOption : (string) config('mail.from.address');
-        $fromName = (string) config('mail.from.name', 'SwMailerPro');
-        $subjectOption = $this->option('subject');
-        $subject = is_string($subjectOption) && $subjectOption !== '' ? $subjectOption : 'SwMailerPro Test E-postası';
+        $from = $this->option('from') ?: config('swmailerpro.defaults.from_email') ?: config('mail.from.address');
+        $fromName = config('mail.from.name', 'SwMailerPro');
+        $subject = $this->option('subject') ?: 'SwMailerPro Test E-postası';
 
         if (empty($from)) {
             $this->error('Gönderici adresi belirtilmedi. --from parametresi kullanın veya config ayarlayın.');
             return self::FAILURE;
         }
 
-        $payload = $factory->fromArray([
+        $payload = PayloadFactory::fromArray([
             'from' => [
                 'email' => $from,
                 'name' => $fromName,
