@@ -2,11 +2,9 @@
 
 namespace SabahWeb\SwMailerPro\Events;
 
-use Illuminate\Foundation\Events\Dispatchable;
 
 class EmailSent
 {
-    use Dispatchable;
 
     public function __construct(
         /** @var array<string, mixed> Gönderilen payload */
@@ -22,6 +20,12 @@ class EmailSent
          *           dinleyici "gönderildi" diye yanlış rapor üretir.
          */
         public readonly bool $queued = false,
+        /**
+         * @var list<string> Gateway'in engelli listesi yüzünden çıkarılan alıcılar.
+         *                   Tümü çıkarıldıysa bu mail kimseye gitmemiştir — yanıt
+         *                   yine de 200 döner, dolayısıyla tek işaret budur.
+         */
+        public readonly array $suppressedRecipients = [],
     ) {
     }
 }

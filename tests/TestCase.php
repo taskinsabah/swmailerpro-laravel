@@ -2,12 +2,23 @@
 
 namespace SabahWeb\SwMailerPro\Tests;
 
+use Illuminate\Support\Facades\Http;
 use Orchestra\Testbench\TestCase as BaseTestCase;
 use SabahWeb\SwMailerPro\Facades\SwMailerPro;
 use SabahWeb\SwMailerPro\SwMailerProServiceProvider;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Http::fake() only stubs the URLs it is given; anything else reaches
+        // the network for real and quietly passes. A test that talks to a
+        // gateway is not testing this package.
+        Http::preventStrayRequests();
+    }
+
     protected function getPackageProviders($app): array
     {
         return [

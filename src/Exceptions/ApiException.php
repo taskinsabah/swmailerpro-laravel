@@ -15,6 +15,8 @@ class ApiException extends SwMailerProException
         public readonly int $httpStatus,
         public readonly ?array $errorBody = null,
         ?\Throwable $previous = null,
+        /** @var string|null Gateway request ID — hata gateway loglarında bununla bulunur. */
+        public readonly ?string $requestId = null,
     ) {
         parent::__construct($message, $httpStatus, $previous);
     }
@@ -31,11 +33,16 @@ class ApiException extends SwMailerProException
         $errorMsg = $body['error']['message'] ?? $response->body();
         $errorCode = $body['error']['code'] ?? 'UNKNOWN';
 
+        $requestId = is_array($body) && is_string($body['request_id'] ?? null) ? $body['request_id'] : null;
+
         return new self(
-            message: "SwMailerPro API Error [{$errorCode}]: {$errorMsg}",
+            message: $requestId !== null
+                ? "SwMailerPro API Error [{$errorCode}]: {$errorMsg} (request_id: {$requestId})"
+                : "SwMailerPro API Error [{$errorCode}]: {$errorMsg}",
             errorCode: $errorCode,
             httpStatus: $response->status(),
             errorBody: is_array($body) ? $body : null,
+            requestId: $requestId,
         );
     }
 }

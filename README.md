@@ -270,11 +270,18 @@ Gateway sağlık durumunu kontrol eder:
 php artisan swmailerpro:health
 ```
 
-Çıktı: provider durumları, circuit breaker, uptime ve database bilgisi.
+Çıktı: durum, uptime, sürüm, şema sürümü, provider tablosu (circuit breaker ve hata oranıyla),
+kuyruk derinliği ve en eski bekleyen iş, ölü mektup sayısı, engelli adres sayısı.
+
+Komut iki durumda **exit 1** döner — ikisi de gateway "healthy" derken maili durdurur:
+
+- **Şema geride**: migration çalışmamış, deploy yarım kalmış.
+- **Kuyruk ilerlemiyor**: bekleyen iş var ve en eskisi 5 dakikayı geçmiş (worker durmuş olabilir).
 
 ### `swmailerpro:test`
 
-Test e-postası gönderir (dry-run):
+Payload'ı gateway'de doğrular. **Dry-run'dır: mail gönderilmez** — uçtan uca gönderim testi için
+normal bir Mailable kullanın.
 
 ```bash
 # Basit test
@@ -304,6 +311,8 @@ class HandleEmailSent
         // $event->requestId — gateway request ID
         // $event->queued    — true ise gateway kuyruğa aldı, HENÜZ TESLİM ETMEDİ
         //                     (async gönderimde 202). Teslimat webhook ile bildirilir.
+        // $event->suppressedRecipients — engelli listedeki alıcılar çıkarıldı.
+        //                     Tümü çıkarıldıysa bu mail kimseye gitmemiştir.
         
         Log::info('Email sent', [
             'to' => $event->payload['personalizations'][0]['to'][0]['email'] ?? null,

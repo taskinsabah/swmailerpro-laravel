@@ -8,6 +8,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
+use SabahWeb\SwMailerPro\Exceptions\ConnectionFailedException;
 
 /**
  * SwMailerPro Gateway HTTP client.
@@ -92,7 +93,10 @@ class SwMailerProClient
      */
     public function health(): array
     {
-        return $this->request('GET', '/api/v1/health');
+        // A degraded gateway answers 503 with a perfectly good success envelope —
+        // that is the answer, not an error. Treating it as one turned the health
+        // command into a stack trace exactly when it had something to report.
+        return $this->request('GET', '/api/v1/health', null, null, [503]);
     }
 
     /**
@@ -106,11 +110,17 @@ class SwMailerProClient
      *
      * @throws ApiException API hata yanıtı
      */
+    /**
+     * @param array<string, mixed>|null $data
+     * @param array<int, int> $tolerate Hata sayılmayacak HTTP kodları
+     * @return array<string, mixed>
+     */
     protected function request(
         string $method,
         string $uri,
         ?array $data = null,
         ?string $idempotencyKey = null,
+        array $tolerate = [],
     ): array {
         $headers = [
             'X-Api-Key' => $this->apiKey,
@@ -166,19 +176,39 @@ class SwMailerProClient
 
         $url = rtrim($this->baseUrl, '/') . $uri;
 
-        /** @var Response $response */
-        $response = match (strtoupper($method)) {
-            'GET' => $pending->get($url),
-            'POST' => $pending->post($url, $data ?? []),
-            'DELETE' => $pending->delete($url, $data ?? []),
-            default => $pending->send($method, $url, ['json' => $data]),
-        };
+        try {
+            /** @var Response $response */
+            $response = match (strtoupper($method)) {
+                'GET' => $pending->get($url),
+                'POST' => $pending->post($url, $data ?? []),
+                'DELETE' => $pending->delete($url, $data ?? []),
+                default => $pending->send($method, $url, ['json' => $data]),
+            };
+        } catch (ConnectionException $e) {
+            throw new ConnectionFailedException(
+                'SwMailerPro: gateway sunucusuna ulaşılamadı — ' . $e->getMessage(),
+                0,
+                $e,
+            );
+        }
 
-        if (! $response->successful()) {
+        if (! $response->successful() && ! in_array($response->status(), $tolerate, true)) {
             throw ApiException::fromResponse($response);
         }
 
-        return $response->json() ?? [];
+        $body = $response->json();
+
+        // A proxy login page or a Cloudflare interstitial is a 200 with a body
+        // that is not ours. Returning [] for it reported undelivered mail as sent.
+        if (! is_array($body)) {
+            throw new ApiException(
+                message: 'SwMailerPro: gateway JSON yanıt döndürmedi — araya bir proxy girmiş olabilir.',
+                errorCode: 'INVALID_RESPONSE',
+                httpStatus: $response->status(),
+            );
+        }
+
+        return $body;
     }
 
     /**

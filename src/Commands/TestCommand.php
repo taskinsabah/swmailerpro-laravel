@@ -3,6 +3,8 @@
 namespace SabahWeb\SwMailerPro\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Date;
 use SabahWeb\SwMailerPro\Client\SwMailerProClient;
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
@@ -33,7 +35,7 @@ class TestCommand extends Command
      */
     protected function configString(string $key): string
     {
-        $value = config($key);
+        $value = Config::get($key);
 
         return is_string($value) ? $value : '';
     }
@@ -75,20 +77,20 @@ class TestCommand extends Command
             'content' => [
                 [
                     'type' => 'text/plain',
-                    'value' => "Bu bir SwMailerPro test e-postasıdır.\nGönderim zamanı: " . now()->toDateTimeString(),
+                    'value' => "Bu bir SwMailerPro test e-postasıdır.\nGönderim zamanı: " . Date::now()->toDateTimeString(),
                 ],
                 [
                     'type' => 'text/html',
                     'value' => '<div style="font-family:sans-serif;padding:20px;background:#f8f9fa;border-radius:8px">'
                         . '<h2 style="color:#2563eb">SwMailerPro Test</h2>'
                         . '<p>Bu bir <strong>test e-postası</strong>dır.</p>'
-                        . '<p style="color:#6b7280;font-size:13px">Gönderim: ' . now()->toDateTimeString() . '</p>'
+                        . '<p style="color:#6b7280;font-size:13px">Gönderim: ' . Date::now()->toDateTimeString() . '</p>'
                         . '</div>',
                 ],
             ],
         ]);
 
-        $this->info("Test e-postası gönderiliyor...");
+        $this->info("Payload doğrulanıyor (dry-run — mail gönderilmez)...");
         $this->line("  Gönderici: {$from}");
         $this->line("  Alıcı:    {$to}");
         $this->line("  Konu:     {$subject}");
@@ -99,19 +101,24 @@ class TestCommand extends Command
 
             $data = $result['data'] ?? $result;
 
+            // /send-test is a dry run: it validates and renders, and returns
+            // message/provider/rendered_messages. There is no status and no
+            // message id, because nothing was sent — printing those rows meant
+            // two permanently empty lines and a success message that lied.
+            $rendered = is_array($data['rendered_messages'] ?? null) ? count($data['rendered_messages']) : null;
+
             $this->table(
                 ['Alan', 'Değer'],
                 [
-                    ['Durum', $data['status'] ?? 'ok'],
-                    ['Mesaj', $data['message'] ?? '-'],
+                    ['Sonuç', $data['message'] ?? 'Doğrulama başarılı'],
                     ['Provider', $data['provider'] ?? '-'],
-                    ['Message ID', $data['provider_message_id'] ?? '-'],
+                    ['Render edilen mesaj', $rendered ?? '-'],
                     ['Request ID', $result['request_id'] ?? '-'],
                 ]
             );
 
             $this->newLine();
-            $this->info('Test e-postası başarıyla gönderildi.');
+            $this->info('Payload doğrulandı. Bu bir dry-run: mail GÖNDERİLMEDİ.');
 
             return self::SUCCESS;
         } catch (ApiException $e) {

@@ -2,11 +2,9 @@
 
 namespace SabahWeb\SwMailerPro\Events;
 
-use Illuminate\Foundation\Events\Dispatchable;
 
 class EmailFailed
 {
-    use Dispatchable;
 
     public function __construct(
         /** @var array<string, mixed> Gönderilemeyen payload */

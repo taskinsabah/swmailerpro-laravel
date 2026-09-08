@@ -71,18 +71,19 @@ class CommandTest extends TestCase
         Http::fake([
             'test-gateway.example.com/api/v1/email/send-test' => Http::response([
                 'success' => true,
+                // The gateway's real dry-run body: no status, no message id,
+                // because nothing was sent. See EmailController::sendTest.
                 'data' => [
-                    'status' => 'validated',
-                    'message' => 'Email validated successfully',
-                    'provider' => 'mailchannels',
-                    'provider_message_id' => 'msg_test_1',
+                    'message' => 'Dry-run successful — email not sent',
+                    'provider' => 'smtp2go',
+                    'rendered_messages' => [['to' => 'dest@example.com']],
                 ],
                 'request_id' => 'req_test_cmd',
             ], 200),
         ]);
 
         $this->artisan('swmailerpro:test', ['--to' => 'dest@example.com'])
-            ->expectsOutputToContain('başarıyla gönderildi')
+            ->expectsOutputToContain('mail GÖNDERİLMEDİ')
             ->assertExitCode(0);
 
         Http::assertSent(function ($request) {

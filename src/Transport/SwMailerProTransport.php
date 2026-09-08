@@ -2,6 +2,9 @@
 
 namespace SabahWeb\SwMailerPro\Transport;
 
+use Illuminate\Contracts\Debug\ExceptionHandler;
+use Illuminate\Support\Facades\App;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use SabahWeb\SwMailerPro\Client\SwMailerProClient;
 use SabahWeb\SwMailerPro\Events\EmailFailed;
@@ -32,56 +35,89 @@ class SwMailerProTransport extends AbstractTransport
 
     protected function doSend(SentMessage $message): void
     {
-        $original = $message->getOriginalMessage();
-
-        // A RawMessage is a MIME blob with no structure to read fields out of;
-        // there is no payload we could honestly build from one.
-        if (! $original instanceof Message) {
-            throw new \RuntimeException('SwMailerPro: yalnızca Symfony Message tabanlı mailler gönderilebilir.');
-        }
-
-        $email = MessageConverter::toEmail($original);
-
-        $from = $email->getFrom();
-        $to = $email->getTo();
-
-        if (empty($from) || empty($to)) {
-            throw new \RuntimeException('SwMailerPro: from ve to alanları zorunludur.');
-        }
-
-        $payload = $this->payloadFactory->fromEmail($email);
-
-        // Defaults'dan tracking ayarları merge
-        $this->applyDefaults($payload);
-
-        // One key per message, not per attempt. Symfony stamps a Message-ID on
-        // every send (generating one if the app did not), so a retry inside the
-        // client reuses this key and the gateway replays its first answer instead
-        // of delivering twice — while a queue worker retrying a failed job builds
-        // a new message, gets a new id, and is correctly sent as a new mail.
-        $idempotencyKey = $this->idempotencyKeyFor($message);
+        // Payload starts empty so a failure while BUILDING it still reports the
+        // same way a failed send does — pre-flight errors used to skip EmailFailed
+        // entirely, which made a malformed template look like nothing happened.
+        $payload = [];
+        $async = (bool) ($this->defaults['async'] ?? false);
 
         try {
-            $async = $this->defaults['async'] ?? false;
+            $original = $message->getOriginalMessage();
+
+            // A RawMessage is a MIME blob with no structure to read fields out of;
+            // there is no payload we could honestly build from one.
+            if (! $original instanceof Message) {
+                throw new \RuntimeException('SwMailerPro: yalnızca Symfony Message tabanlı mailler gönderilebilir.');
+            }
+
+            $email = MessageConverter::toEmail($original);
+
+            if (empty($email->getFrom()) || empty($email->getTo())) {
+                throw new \RuntimeException('SwMailerPro: from ve to alanları zorunludur.');
+            }
+
+            $payload = $this->payloadFactory->fromEmail($email);
+            $this->applyDefaults($payload);
+
+            // One key per message, not per attempt. Symfony stamps a Message-ID on
+            // every send, so a retry inside the client reuses this key and the
+            // gateway replays its first answer instead of delivering twice — while a
+            // queue worker retrying a failed job builds a new message, gets a new id,
+            // and is correctly sent as the new mail it is. It also keeps the gateway
+            // from falling back to content-fingerprint dedup, which silently swallows
+            // a second, legitimately identical message within its TTL.
+            $idempotencyKey = $this->idempotencyKeyFor($message);
+
             $response = $async
                 ? $this->client->sendAsync($payload, $idempotencyKey)
                 : $this->client->send($payload, $idempotencyKey);
-
-            $requestId = $response['request_id'] ?? null;
-
-            event(new EmailSent(
-                payload: $payload,
-                response: $response,
-                requestId: is_string($requestId) ? $requestId : null,
-                queued: (bool) $async,
-            ));
         } catch (\Throwable $e) {
-            event(new EmailFailed(
+            Event::dispatch(new EmailFailed(
                 payload: $payload,
                 exception: $e,
             ));
 
             throw $e;
+        }
+
+        $this->recordSuccess($message, $payload, $response, $async);
+    }
+
+    /**
+     * Gönderim başarılı; bundan sonrası defter tutma.
+     *
+     * @param array<string, mixed> $payload
+     * @param array<string, mixed> $response
+     */
+    protected function recordSuccess(SentMessage $message, array $payload, array $response, bool $async): void
+    {
+        $data = is_array($response['data'] ?? null) ? $response['data'] : [];
+        $requestId = $response['request_id'] ?? null;
+
+        // Laravel's own SentMessage carries this onward, so an application can tie
+        // its log line to the gateway's record without reading our events at all.
+        $providerMessageId = $data['provider_message_id'] ?? null;
+        if (is_string($providerMessageId) && $providerMessageId !== '') {
+            $message->setMessageId($providerMessageId);
+        }
+
+        $suppressed = is_array($data['suppressed_recipients'] ?? null)
+            ? array_values(array_filter($data['suppressed_recipients'], 'is_string'))
+            : [];
+
+        try {
+            Event::dispatch(new EmailSent(
+                payload: $payload,
+                response: $response,
+                requestId: is_string($requestId) ? $requestId : null,
+                queued: $async,
+                suppressedRecipients: $suppressed,
+            ));
+        } catch (\Throwable $e) {
+            // The mail has already left. A listener that throws must not be turned
+            // into a send failure: Symfony would report the send as failed and the
+            // queue would retry a message the gateway has already delivered.
+            App::make(ExceptionHandler::class)->report($e);
         }
     }
 

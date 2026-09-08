@@ -2,6 +2,7 @@
 
 namespace SabahWeb\SwMailerPro;
 
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\ServiceProvider;
 use SabahWeb\SwMailerPro\Client\SwMailerProClient;
@@ -47,14 +48,14 @@ class SwMailerProServiceProvider extends ServiceProvider
     {
         // Config publish
         $this->publishes([
-            __DIR__ . '/../config/swmailerpro.php' => config_path('swmailerpro.php'),
+            __DIR__ . '/../config/swmailerpro.php' => $this->app->configPath('swmailerpro.php'),
         ], 'swmailerpro-config');
 
         // Mail transport kaydı
         Mail::extend('swmailerpro', function (array $config) {
             // Read here rather than captured at boot: an application that sets
             // config at runtime (tests do) must still get the values it set.
-            $swConfig = (array) config('swmailerpro', []);
+            $swConfig = (array) Config::get('swmailerpro', []);
 
             $url = (string) ($config['url'] ?? $swConfig['url'] ?? '');
             $key = (string) ($config['key'] ?? $swConfig['key'] ?? '');

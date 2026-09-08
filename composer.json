@@ -11,9 +11,13 @@
     ],
     "require": {
         "php": "^8.2",
-        "illuminate/support": "^12.0 || ^13.0",
+        "illuminate/console": "^12.0 || ^13.0",
+        "illuminate/contracts": "^12.0 || ^13.0",
         "illuminate/http": "^12.0 || ^13.0",
-        "illuminate/mail": "^12.0 || ^13.0"
+        "illuminate/mail": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "symfony/mailer": "^7.4 || ^8.0",
+        "symfony/mime": "^7.4 || ^8.0"
     },
     "require-dev": {
         "orchestra/testbench": "^10.0 || ^11.0",
@@ -39,6 +43,10 @@
                 "SwMailerPro": "SabahWeb\\SwMailerPro\\Facades\\SwMailerPro"
             }
         }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse"
     },
     "config": {
         "sort-packages": true

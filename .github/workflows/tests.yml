@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Nothing in this package was ever proven to run: a fatal static call sat in
+    # a tagged commit because neither the suite nor PHPStan ran anywhere. This
+    # matrix is what makes "passes" mean something.
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+        laravel: ['12.*', '13.*']
+        dependency-version: [prefer-lowest, prefer-stable]
+        exclude:
+          # Laravel 13 requires PHP 8.3.
+          - php: '8.2'
+            laravel: '13.*'
+
+    name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }} · ${{ matrix.dependency-version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, intl
+          coverage: none
+
+      # laravel/framework replaces every illuminate/* split, so requiring it
+      # pins the whole line deterministically instead of letting each split
+      # resolve on its own.
+      - name: Pin the Laravel line
+        run: composer require "laravel/framework:${{ matrix.laravel }}" --no-interaction --no-update
+
+      - name: Install dependencies
+        run: composer update --${{ matrix.dependency-version }} --prefer-dist --no-interaction --no-progress
+
+      - name: Tests
+        run: vendor/bin/phpunit
+
+      - name: Static analysis
+        run: vendor/bin/phpstan analyse --no-progress
+
+      # A package that imports Illuminate\Foundation depends on the whole
+      # framework while its manifest claims otherwise.
+      - name: No Foundation imports
+        run: "! grep -rn 'Illuminate\\Foundation' src/ || exit 1"
