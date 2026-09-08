@@ -446,4 +446,29 @@ class RetryPolicyTest extends TestCase
 
         $this->assertSame(1, $this->attempts(), 'bir yönlendirme geçici bir hata değildir');
     }
+    #[Test]
+    public function a_rate_limit_without_a_retry_after_is_not_retried(): void
+    {
+        // Başlığın yokluğu iki statüde farklı okunuyor; 5xx tarafı
+        // a_server_error_without_a_retry_after_still_uses_the_base_backoff'ta.
+        Http::fake([
+            '*' => Http::response(
+                ['success' => false, 'error' => ['code' => 'RATE_LIMIT', 'message' => 'too many requests']],
+                429,
+            ),
+        ]);
+
+        $this->expectException(ApiException::class);
+
+        try {
+            $this->client()->send($this->payload());
+        } finally {
+            $this->assertSame(
+                1,
+                $this->attempts(),
+                'ne kadar bekleneceğini bilmeden tekrar denemek, sıfırlanmamış bir limite bir deneme daha harcar',
+            );
+            Sleep::assertNeverSlept();
+        }
+    }
 }

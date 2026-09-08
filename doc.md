@@ -291,7 +291,11 @@ Retry yapısı sadece geçici hatalarda devreye girer (429 rate limit, 5xx serve
 
 Yanıt bir `Retry-After` taşıyorsa — 429 da olsa 5xx de olsa — istenen bekleme
 `max_retry_after` tavanını aşarsa hiç beklenmez; istek anında hatayla döner ve işi
-kuyruk tekrarlar. Varsayılan tavan 5 saniyedir.
+kuyruk tekrarlar. Varsayılan tavan 5 saniyedir. Başlığın hem saniye hem RFC 7231
+tarih biçimi okunur.
+
+Başlığın yokluğu iki statüde farklı okunur: `Retry-After` taşımayan bir 429 hiç
+denenmez, aynı durumdaki bir 5xx ise normal backoff ile denenir.
 
 ---
 

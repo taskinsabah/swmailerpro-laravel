@@ -158,14 +158,10 @@ class SwMailerProClient
      * 4xx kalıcı hatalardır, tekrar denenmez.
      *
      * @param array<string, mixed>|null $data
+     * @param array<int, int> $tolerate Hata sayılmayacak HTTP kodları
      * @return array<string, mixed>
      *
      * @throws ApiException API hata yanıtı
-     */
-    /**
-     * @param array<string, mixed>|null $data
-     * @param array<int, int> $tolerate Hata sayılmayacak HTTP kodları
-     * @return array<string, mixed>
      */
     protected function request(
         string $method,

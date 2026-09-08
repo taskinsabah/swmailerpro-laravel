@@ -482,7 +482,9 @@ Client sadece geçici hatalarda tekrar dener:
 - **5xx** Server Error → retry — ama yanıt bir `Retry-After` taşıyorsa o da bağlayıcıdır
   (aşağıdaki tavan kuralı).
 - **ConnectionException** → retry
-- **429** Too Many Requests → yanıttaki `Retry-After` beklenir ve tekrar denenir
+- **429** Too Many Requests → yanıttaki `Retry-After` beklenir ve tekrar denenir.
+  `Retry-After` **taşımayan** bir 429 hiç denenmez: ne kadar bekleneceğini bilmeden
+  tekrar denemek, henüz sıfırlanmamış bir limite bir deneme daha harcamaktır.
 - **4xx** (400, 401, 403) → **retry yapılmaz** (kalıcı hatalar)
 
 **Retry-After tavanı.** 429 ve 5xx fark etmez: gateway tavandan daha uzun bir bekleme
