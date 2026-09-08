@@ -7,6 +7,7 @@ use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use SabahWeb\SwMailerPro\Tests\TestCase;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Header\ParameterizedHeader;
 
 /**
  * What the payload must carry across from a Symfony Email that it used to drop
@@ -173,5 +174,107 @@ class PayloadFidelityTest extends TestCase
         foreach (array_keys($payload['headers'] ?? []) as $name) {
             $this->assertStringNotContainsString('X-SwMailerPro', $name);
         }
+    }
+    // ─── Başlıklar gateway'e ham gider ───────────────────────────────────
+
+    #[Test]
+    public function an_ascii_header_travels_unchanged(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-Correlation-Id', 'abc-123');
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame('abc-123', $payload['headers']['X-Correlation-Id']);
+    }
+
+    #[Test]
+    public function a_turkish_header_reaches_the_gateway_as_raw_utf8(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-Customer-Name', 'Ayşe Yılmaz');
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame('Ayşe Yılmaz', $payload['headers']['X-Customer-Name']);
+    }
+
+    #[Test]
+    public function a_long_turkish_header_carries_no_fold(): void
+    {
+        $value = str_repeat('şğüöç-katlama ', 20);
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-Uzun-Not', $value);
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame($value, $payload['headers']['X-Uzun-Not']);
+        $this->assertStringNotContainsString("\r", $payload['headers']['X-Uzun-Not']);
+        $this->assertStringNotContainsString("\n", $payload['headers']['X-Uzun-Not']);
+    }
+
+    #[Test]
+    public function a_line_break_in_a_header_value_stops_the_send(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-Note', "ok\r\nBcc: spy@evil.test");
+
+        $this->expectException(SwMailerProException::class);
+        $this->expectExceptionMessageMatches('/X-Note/');
+
+        $this->factory()->fromEmail($email);
+    }
+
+    #[Test]
+    public function a_bare_line_feed_in_a_header_value_stops_the_send(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-Note', "ok\nBcc: spy@evil.test");
+
+        $this->expectException(SwMailerProException::class);
+
+        $this->factory()->fromEmail($email);
+    }
+
+    #[Test]
+    public function a_line_break_in_a_header_name_stops_the_send(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader("X-Note\r\nBcc", 'spy@evil.test');
+
+        $this->expectException(SwMailerProException::class);
+
+        $this->factory()->fromEmail($email);
+    }
+
+    #[Test]
+    public function a_parameterized_header_keeps_its_parameters(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->add(
+            new ParameterizedHeader('X-Param', 'attachment', ['filename' => 'räksmörgås.txt'])
+        );
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame(
+            "attachment; filename*=utf-8''r%C3%A4ksm%C3%B6rg%C3%A5s.txt",
+            $payload['headers']['X-Param'],
+        );
+    }
+
+    #[Test]
+    public function template_data_with_unescaped_unicode_still_decodes(): void
+    {
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-SwMailerPro-Template', 'siparis-onayi');
+        $email->getHeaders()->addTextHeader(
+            'X-SwMailerPro-Data',
+            json_encode(['name' => 'Ayşe'], JSON_UNESCAPED_UNICODE),
+        );
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame(['name' => 'Ayşe'], $payload['template_data']);
     }
 }

@@ -5,7 +5,10 @@ namespace SabahWeb\SwMailerPro\Payload;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
 use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Header\HeaderInterface;
 use Symfony\Component\Mime\Header\Headers;
+use Symfony\Component\Mime\Header\ParameterizedHeader;
+use Symfony\Component\Mime\Header\UnstructuredHeader;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
 
@@ -219,7 +222,78 @@ class PayloadFactory
      */
     protected function headerValue(Headers $headers, string $name): ?string
     {
-        return $headers->get($name)?->getBodyAsString();
+        $header = $headers->get($name);
+
+        return $header === null ? null : $this->headerBody($header);
+    }
+
+    /**
+     * Bir başlığın gateway'e gidecek gövdesi: ham UTF-8, satır sonsuz.
+     *
+     * Gateway değeri JSON'da alıp sağlayıcıya olduğu gibi veriyor
+     * (mailchannels.provider.ts `body.headers = payload.headers`,
+     * smtp2go.provider.ts `custom_headers.push({ header, value })`) ve MIME
+     * kodlamasını sağlayıcı yapıyor — gateway hiçbir yerde kodlama yapmıyor.
+     * Bu yüzden getBodyAsString()'in ürettiği =?utf-8?Q?..?= biçimi burada
+     * yanlıştı: sağlayıcı onu bir kez daha kodlayınca alıcı "Ayşe" yerine
+     * "=?utf-8?Q?Ay=C5=9Fe?=" görüyordu. Subject ve display name zaten ham
+     * gidiyor; başlık da onlarla aynı yoldan gitmeli.
+     */
+    protected function headerBody(HeaderInterface $header): string
+    {
+        // ParameterizedHeader ÖNCE sorulmalı: UnstructuredHeader'ı genişletiyor
+        // ve getValue() ondan yalnızca temel değeri döndürür — parametreler
+        // düşer (attachment; filename*=... -> attachment). Parametrelerin
+        // RFC 2231 karşılığı ham metnin değil telin biçimidir; bu yüzden
+        // burada gövdenin tamamı alınır.
+        if ($header instanceof ParameterizedHeader) {
+            return $this->assertNoLineBreak($header->getName(), $this->unfold($header->getBodyAsString()));
+        }
+
+        // Düz metin başlık: değer ham gider. getValue() katlama da yapmaz;
+        // getBodyAsString() uzun bir Türkçe değeri satırlara bölüp aralarına
+        // CRLF koyuyordu, gateway de o CRLF yüzünden isteği 400'lüyordu.
+        if ($header instanceof UnstructuredHeader) {
+            return $this->assertNoLineBreak($header->getName(), $header->getValue());
+        }
+
+        // Mailbox/Date/Id/Path başlıkları: gövdeleri zaten string değil
+        // (Address, DateTimeImmutable, string[]); tek doğru karşılıkları tel biçimi.
+        return $this->assertNoLineBreak($header->getName(), $this->unfold($header->getBodyAsString()));
+    }
+
+    /**
+     * RFC 5322 katlamasını geri alır: CRLF + boşluk, o boşluğa iner. Katlanmış
+     * bir başlık katlanmamış hâliyle aynı anlama gelir, dolayısıyla aşağıdaki
+     * kontrol yalnızca gerçek satır sonlarına takılır.
+     */
+    protected function unfold(string $value): string
+    {
+        return preg_replace("/\r\n([ \t])/", '$1', $value) ?? $value;
+    }
+
+    /**
+     * Satır sonu taşıyan bir başlığı reddeder — düzeltmez.
+     *
+     * Bir CR ya da LF, sağlayıcının kurduğu mesaja yeni başlık yazma yoludur:
+     * "ok\r\nBcc: x@y" tek bir X-Note değil, bir X-Note ile bir Bcc'dir.
+     * Ayıklamak ya da boşluğa çevirmek, uygulamanın yazmadığı bir başlığı
+     * sessizce teslim etmek olurdu. guardSize ve guardCapabilities'teki karar
+     * burada da geçerli: gateway'in zaten reddedeceği (validators/schemas.ts
+     * personalizationHeadersSchema) bir isteği ağa hiç çıkarmadan, sebebini
+     * söyleyerek bitiriyoruz.
+     */
+    protected function assertNoLineBreak(string $name, string $value): string
+    {
+        if (! preg_match("/[\r\n]/", $value)) {
+            return $value;
+        }
+
+        throw new SwMailerProException(sprintf(
+            'SwMailerPro: "%s" başlığı satır sonu içeriyor; bir CRLF sağlayıcının '
+            . 'mesajına yeni bir başlık yazar. İstek gönderilmedi.',
+            str_replace(["\r", "\n"], ['\r', '\n'], $name),
+        ));
     }
 
     /**
@@ -242,7 +316,13 @@ class PayloadFactory
                 continue;
             }
 
-            $custom[$header->getName()] = $header->getBodyAsString();
+            $rawName = $header->getName();
+
+            // Symfony başlık adını doğrulamıyor: adının içine CRLF konmuş bir
+            // başlık da kabul ediliyor, ve ad da değer kadar iyi bir enjeksiyon yolu.
+            $this->assertNoLineBreak($rawName, $rawName);
+
+            $custom[$rawName] = $this->headerBody($header);
         }
 
         return $custom;

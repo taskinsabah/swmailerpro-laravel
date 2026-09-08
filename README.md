@@ -197,6 +197,17 @@ ise mesajın değil gönderim altyapısının ayarı — bu paket hangi alan ad�
 atıldığını iddia etmez. Aynı kural ham payload yolu için de geçerlidir:
 `'transactional' => false` (ya da `0`, `'false'`, `null`) aynı şekilde reddedilir.
 
+**Kendi başlıklarınız.** Mesaja eklediğiniz diğer başlıklar payload'a `headers`
+olarak, **ham UTF-8** hâlleriyle girer — MIME kodlamasını sağlayıcı yapar, paket
+değil. Yani `Ayşe Yılmaz` gateway'e o şekilde gider, `=?utf-8?Q?..?=` olarak değil.
+
+Bir başlığın adında ya da değerinde satır sonu (CR veya LF) varsa gönderim
+**yerelde reddedilir** ve `SwMailerProException` fırlatılır; gateway'e hiçbir istek
+çıkmaz. Bir CRLF, sağlayıcının kurduğu mesaja yeni bir başlık yazma yoludur —
+`"ok\r\nBcc: x@y"` tek bir başlık değil, bir başlık artı bir `Bcc`'dir. Ayıklamak
+uygulamanın yazmadığı bir başlığı sessizce teslim etmek olurdu, o yüzden istek
+durur.
+
 ### Mod 2: Facade / Direct API Client
 
 SwMailerPro API'sine doğrudan raw payload ile çalışır. Laravel Mail akışından bağımsızdır.
