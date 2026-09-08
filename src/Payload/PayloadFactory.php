@@ -3,6 +3,7 @@
 namespace SabahWeb\SwMailerPro\Payload;
 
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
+use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Header\Headers;
 use Symfony\Component\Mime\Email;
@@ -146,7 +147,17 @@ class PayloadFactory
         // Transactional flag
         $transactional = $this->headerValue($headers, 'X-SwMailerPro-Transactional');
         if ($transactional !== null) {
-            $payload['transactional'] = filter_var($transactional, FILTER_VALIDATE_BOOLEAN);
+            // filter_var yalnızca "1", "true", "on", "yes" için true döner. Geri kalan
+            // her şey — "false" ve "0" kadar, yazım hatasıyla girilmiş "maybe" de —
+            // non-transactional gönderim istemek demektir ve burada biter.
+            if (! filter_var($transactional, FILTER_VALIDATE_BOOLEAN)) {
+                throw UnsupportedFeatureException::nonTransactional(
+                    'X-SwMailerPro-Transactional',
+                    $transactional,
+                );
+            }
+
+            $payload['transactional'] = true;
             $headers->remove('X-SwMailerPro-Transactional');
         }
 
@@ -222,6 +233,10 @@ class PayloadFactory
      */
     public function fromArray(array $data): array
     {
+        // Desteklenmeyen bir yetenek isteniyorsa eksik alan aramanın anlamı yok;
+        // çağıranın duyması gereken hata bu.
+        UnsupportedFeatureException::guardPayload($data);
+
         // from zorunlu
         if (empty($data['from']) || !isset($data['from']['email'])) {
             throw new SwMailerProException(

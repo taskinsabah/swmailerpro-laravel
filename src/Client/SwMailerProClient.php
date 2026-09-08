@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
 use SabahWeb\SwMailerPro\Exceptions\ConnectionFailedException;
 use SabahWeb\SwMailerPro\Exceptions\PayloadTooLargeException;
+use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
 
 /**
  * SwMailerPro Gateway HTTP client.
@@ -78,6 +79,7 @@ class SwMailerProClient
      */
     public function send(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardCapabilities($payload);
         $this->guardSize($payload);
 
         return $this->request('POST', '/api/v1/email/send', $payload, $idempotencyKey);
@@ -92,6 +94,7 @@ class SwMailerProClient
      */
     public function sendAsync(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardCapabilities($payload);
         $this->guardSize($payload);
 
         return $this->request('POST', '/api/v1/email/send-async', $payload, $idempotencyKey);
@@ -106,6 +109,7 @@ class SwMailerProClient
      */
     public function sendTest(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardCapabilities($payload);
         $this->guardSize($payload);
 
         return $this->request('POST', '/api/v1/email/send-test', $payload, $idempotencyKey);
@@ -235,6 +239,24 @@ class SwMailerProClient
         }
 
         return $body;
+    }
+
+    /**
+     * Bu istemcinin desteklemediği bir yeteneği isteyen payload'ı reddeder.
+     *
+     * guardSize gateway'in tavanlarını kopyalar; bu ise bilerek gateway'den daha
+     * katı. Gateway transactional:false'ı, çağıran kendi dkim_selector'ını
+     * yollarsa kabul ediyor — bu istemci hiçbir koşulda DKIM kimliği iddia
+     * etmiyor. Gerekçesi UnsupportedFeatureException docblock'unda; bu yüzden
+     * guardSize'daki gibi bir tavanı 0 yapıp kapatma kaçamağı da yok.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws UnsupportedFeatureException
+     */
+    protected function guardCapabilities(array $payload): void
+    {
+        UnsupportedFeatureException::guardPayload($payload);
     }
 
     /**

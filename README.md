@@ -184,7 +184,14 @@ class OrderConfirmation extends Mailable
 | `X-SwMailerPro-Template` | `template_id` |
 | `X-SwMailerPro-Data` | `template_data` (JSON) |
 | `X-SwMailerPro-Campaign` | `campaign_id` |
-| `X-SwMailerPro-Transactional` | `transactional` (bool) |
+| `X-SwMailerPro-Transactional` | `transactional` — yalnızca `true` |
+
+`X-SwMailerPro-Transactional` başlığı `true` dışında bir değer taşıyorsa gönderim
+**yerelde reddedilir** ve `UnsupportedFeatureException` fırlatılır; gateway'e hiçbir
+istek çıkmaz. Non-transactional mail gateway'de DKIM imzası şartına bağlı, DKIM kimliği
+ise mesajın değil gönderim altyapısının ayarı — bu paket hangi alan adı adına imza
+atıldığını iddia etmez. Aynı kural ham payload yolu için de geçerlidir:
+`'transactional' => false` (ya da `0`, `'false'`, `null`) aynı şekilde reddedilir.
 
 ### Mod 2: Facade / Direct API Client
 
@@ -418,7 +425,10 @@ $this->assertTrue($result['success']);
 ```php
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
 use SabahWeb\SwMailerPro\Exceptions\ConfigurationException;
+use SabahWeb\SwMailerPro\Exceptions\ConnectionFailedException;
+use SabahWeb\SwMailerPro\Exceptions\PayloadTooLargeException;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
+use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
 
 try {
     $response = SwMailerPro::send($payload);
@@ -427,7 +437,15 @@ try {
     $e->errorCode;   // 'VALIDATION_ERROR', 'RATE_LIMIT', vb.
     $e->httpStatus;  // 400, 429, 500, vb.
     $e->errorBody;   // ['error' => ['code' => '...', 'message' => '...']]
+    $e->requestId;   // Gateway loglarında bu isteği bulmak için
     $e->getMessage(); // "SwMailerPro API Error [CODE]: message"
+} catch (ConnectionFailedException $e) {
+    // Gateway'e hiç ulaşılamadı: DNS, TLS, bağlantı ya da yanıt zaman aşımı
+} catch (UnsupportedFeatureException $e) {
+    // Paketin desteklemediği bir yetenek istendi (bugün: non-transactional
+    // gönderim). İstek ağa hiç çıkmadı; tekrar denemek düzeltmez.
+} catch (PayloadTooLargeException $e) {
+    // Gateway tavanını aşıyor; yüklemeye başlamadan yerelde reddedildi
 } catch (ConfigurationException $e) {
     // URL veya API Key eksik
 } catch (SwMailerProException $e) {
