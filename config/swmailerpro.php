@@ -28,6 +28,9 @@ return [
 
     'transport' => [
         'timeout' => env('SWMAILERPRO_TRANSPORT_TIMEOUT', 30),
+        // Ayrı tutuluyor: ulaşılamayan bir gateway saniyeler içinde
+        // raporlanmalı, tüm yanıt bütçesi dolduktan sonra değil.
+        'connect_timeout' => env('SWMAILERPRO_TRANSPORT_CONNECT_TIMEOUT', 10),
         'retry' => [
             'times' => 2,
             'sleep' => 200,
@@ -46,11 +49,28 @@ return [
 
     'client' => [
         'timeout' => env('SWMAILERPRO_CLIENT_TIMEOUT', 30),
+        'connect_timeout' => env('SWMAILERPRO_CLIENT_CONNECT_TIMEOUT', 10),
         'retry' => [
             'times' => 2,
             'sleep' => 200,
         ],
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Idempotency
+    |--------------------------------------------------------------------------
+    |
+    | Her gönderim isteğine Idempotency-Key başlığı eklenir; gateway aynı
+    | anahtarla gelen tekrarı ilk yanıtı döndürerek karşılar. Tekrar denemeyi
+    | (timeout, 5xx) güvenli kılan şey budur — kapatırsanız bir zaman aşımı
+    | sonrası tekrar deneme aynı maili iki kez gönderebilir.
+    |
+    | Yalnızca Idempotency-Key desteklemeyen eski bir gateway için kapatın.
+    |
+    */
+
+    'idempotency' => env('SWMAILERPRO_IDEMPOTENCY', true),
 
     /*
     |--------------------------------------------------------------------------

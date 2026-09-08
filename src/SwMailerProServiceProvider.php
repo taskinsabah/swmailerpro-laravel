@@ -33,8 +33,10 @@ class SwMailerProServiceProvider extends ServiceProvider
             return new SwMailerProClient(
                 baseUrl: $url,
                 apiKey: $key,
-                timeout: $config['client']['timeout'] ?? 30,
+                timeout: (int) ($config['client']['timeout'] ?? 30),
                 retry: $config['client']['retry'] ?? ['times' => 2, 'sleep' => 200],
+                connectTimeout: (int) ($config['client']['connect_timeout'] ?? 10),
+                idempotency: (bool) ($config['idempotency'] ?? true),
             );
         });
 
@@ -50,10 +52,12 @@ class SwMailerProServiceProvider extends ServiceProvider
 
         // Mail transport kaydı
         Mail::extend('swmailerpro', function (array $config) {
-            $swConfig = $this->app['config']['swmailerpro'];
+            // Read here rather than captured at boot: an application that sets
+            // config at runtime (tests do) must still get the values it set.
+            $swConfig = (array) config('swmailerpro', []);
 
-            $url = $config['url'] ?? $swConfig['url'] ?? '';
-            $key = $config['key'] ?? $swConfig['key'] ?? '';
+            $url = (string) ($config['url'] ?? $swConfig['url'] ?? '');
+            $key = (string) ($config['key'] ?? $swConfig['key'] ?? '');
 
             if (empty($url) || empty($key)) {
                 throw new ConfigurationException(
@@ -62,14 +66,17 @@ class SwMailerProServiceProvider extends ServiceProvider
                 );
             }
 
-            $transportConfig = $swConfig['transport'] ?? [];
-            $defaults = $swConfig['defaults'] ?? [];
+            $transportConfig = (array) ($swConfig['transport'] ?? []);
+            /** @var array{async?: bool, tracking?: array{open?: bool|null, click?: bool|null}} $defaults */
+            $defaults = (array) ($swConfig['defaults'] ?? []);
 
             $client = new SwMailerProClient(
                 baseUrl: $url,
                 apiKey: $key,
-                timeout: $transportConfig['timeout'] ?? 30,
-                retry: $transportConfig['retry'] ?? ['times' => 2, 'sleep' => 200],
+                timeout: (int) ($transportConfig['timeout'] ?? 30),
+                retry: (array) ($transportConfig['retry'] ?? ['times' => 2, 'sleep' => 200]),
+                connectTimeout: (int) ($transportConfig['connect_timeout'] ?? 10),
+                idempotency: (bool) ($swConfig['idempotency'] ?? true),
             );
 
             return new SwMailerProTransport(

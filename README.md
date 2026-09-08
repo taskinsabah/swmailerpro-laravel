@@ -9,8 +9,8 @@ SwMailerPro email gateway için resmi Laravel paketi. Mail transport ve doğruda
 
 ## Gereksinimler
 
-- PHP 8.2+
-- Laravel 12+
+- PHP 8.2+ (Laravel 13 kullanıyorsanız 8.3+)
+- Laravel 12 veya 13
 - SwMailerPro Gateway erişimi (URL + API Key)
 
 ## Kurulum
@@ -41,6 +41,7 @@ SWMAILERPRO_KEY=your-tenant-api-key
 | `url` / `key` | Gateway bağlantısı — her iki mod paylaşır |
 | `transport` | Mailable gönderimlerinde timeout/retry |
 | `client` | Facade/direct API kullanımında timeout/retry |
+| `idempotency` | Gönderim isteklerine `Idempotency-Key` eklenir (varsayılan açık) |
 | `defaults` | `async`, `tracking.open`, `tracking.click` |
 
 ```php
@@ -51,13 +52,19 @@ return [
 
     'transport' => [
         'timeout' => env('SWMAILERPRO_TRANSPORT_TIMEOUT', 30),
+        'connect_timeout' => env('SWMAILERPRO_TRANSPORT_CONNECT_TIMEOUT', 10),
         'retry' => ['times' => 2, 'sleep' => 200],
     ],
 
     'client' => [
         'timeout' => env('SWMAILERPRO_CLIENT_TIMEOUT', 30),
+        'connect_timeout' => env('SWMAILERPRO_CLIENT_CONNECT_TIMEOUT', 10),
         'retry' => ['times' => 2, 'sleep' => 200],
     ],
+
+    // Tekrar denemeyi güvenli kılan şey: gateway aynı anahtarla gelen ikinci
+    // isteği ilk yanıtı döndürerek karşılar, maili tekrar göndermez.
+    'idempotency' => env('SWMAILERPRO_IDEMPOTENCY', true),
 
     'defaults' => [
         'async' => false,
@@ -295,6 +302,8 @@ class HandleEmailSent
         // $event->payload   — gönderilen payload
         // $event->response  — API yanıtı
         // $event->requestId — gateway request ID
+        // $event->queued    — true ise gateway kuyruğa aldı, HENÜZ TESLİM ETMEDİ
+        //                     (async gönderimde 202). Teslimat webhook ile bildirilir.
         
         Log::info('Email sent', [
             'to' => $event->payload['personalizations'][0]['to'][0]['email'] ?? null,
@@ -403,10 +412,17 @@ try {
 ### Retry Stratejisi
 
 Client sadece geçici hatalarda tekrar dener:
-- **429** Too Many Requests → retry
 - **5xx** Server Error → retry
 - **ConnectionException** → retry
+- **429** Too Many Requests → yanıttaki `Retry-After` **5 saniyeye kadarsa** beklenir ve
+  tekrar denenir. Daha uzunsa istek hatayla döner: bir worker'ı bir mesaj için bir dakika
+  bloke etmek, hatayı kuyruğa geri vermekten pahalıdır.
 - **4xx** (400, 401, 403) → **retry yapılmaz** (kalıcı hatalar)
+
+Her gönderim isteği bir `Idempotency-Key` taşır (mesajın Message-ID'si). Aynı mesajın her
+denemesi aynı anahtarı kullanır, dolayısıyla gateway'in kabul ettiği bir mail zaman aşımı
+sonrası tekrar denendiğinde ikinci kez gönderilmez. Kuyruktaki bir job yeniden denendiğinde
+mesaj baştan kurulur, yeni bir Message-ID alır ve olması gerektiği gibi yeni bir mail olarak gider.
 
 ---
 

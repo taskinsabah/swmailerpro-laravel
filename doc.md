@@ -1,6 +1,6 @@
 # SwMailerPro Laravel — Entegrasyon ve Deploy Rehberi
 
-Bu rehber, `sabahweb/swmailerpro-laravel` paketini mevcut bir Laravel 12 projesine adım adım kurmayı ve production ortamında aktif etmeyi kapsar.
+Bu rehber, `sabahweb/swmailerpro-laravel` paketini mevcut bir Laravel 12 veya 13 projesine adım adım kurmayı ve production ortamında aktif etmeyi kapsar.
 
 ---
 
@@ -218,12 +218,14 @@ Transport modu her gönderimde event dispatch eder. Bunları dinleyebilirsiniz:
 use SabahWeb\SwMailerPro\Events\EmailSent;
 use SabahWeb\SwMailerPro\Events\EmailFailed;
 
-// Laravel 12 — bootstrap/app.php
+// Laravel 12 / 13 — bootstrap/app.php
 ->withEvents(function () {
     Event::listen(EmailSent::class, function (EmailSent $event) {
-        logger()->info('Email sent', [
+        logger()->info($event->queued ? 'Email queued' : 'Email sent', [
             'request_id' => $event->requestId,
             'provider'   => $event->response['data']['provider'] ?? null,
+            // async gönderimde true: gateway kabul etti, teslim etmedi.
+            'queued'     => $event->queued,
         ]);
     });
 
