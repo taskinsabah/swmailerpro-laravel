@@ -336,8 +336,10 @@ class HandleEmailSent
         // $event->requestId — gateway request ID
         // $event->queued    — true ise gateway kuyruğa aldı, HENÜZ TESLİM ETMEDİ
         //                     (async gönderimde 202). Teslimat webhook ile bildirilir.
-        // $event->suppressedRecipients — engelli listedeki alıcılar çıkarıldı.
-        //                     Tümü çıkarıldıysa bu mail kimseye gitmemiştir.
+        // $event->suppressedRecipients — engelli listedeki alıcılar çıkarıldı,
+        //                     mesaj kalanlara gitti. Alıcıların TAMAMI elenirse
+        //                     gateway 422 döner ve bu event hiç yayınlanmaz;
+        //                     o durumu EmailFailed / ApiException ile yakalayın.
         //
         // Not: payload'daki ek içerikleri event'e KONULMAZ ('content' => null,
         // yerine 'size_bytes'). Kuyruğa alınmış bir dinleyici event'i serialize
@@ -545,10 +547,21 @@ mesaj baştan kurulur, yeni bir Message-ID alır ve olması gerektiği gibi yeni
 - [ ] Notification Channel
 - [ ] TemplateMailable sınıfı
 - [ ] WebhookController (event handling)
-- [ ] Suppression list yönetimi
-- [ ] Template CRUD
 - [ ] Bulk send
-- [ ] Domain/DKIM yönetimi
+
+### Paket kapsamı dışında: operatör uçları
+
+Suppression list yönetimi, template CRUD, gönderim logları ve domain/DKIM yönetimi
+bu pakete eklenmeyecek. Gateway'de bu uçlar tenant anahtarıyla değil `INTERNAL_API_KEY`
+ile korunuyor ve tenant kimliğini isteğin kendisinden okuyorlar — yani bir Laravel
+uygulamasına o anahtarı vermek, ona yalnızca kendi kayıtlarını değil bütün tenant'ların
+kayıtlarını açmak demek. Bunlar operatör uçlarıdır.
+
+Uygulamanın gerçekte ihtiyaç duyduğu şey — "bu adrese gönderilebilir mi" — gönderim
+yolunda zaten karşılanıyor: gateway alıcıları tenant bazlı süzüyor, kısmi elemede
+kalanları `EmailSent::$suppressedRecipients` ile bildiriyor, tamamı elenirse 422 ile
+reddediyor. Tenant-kapsamlı bir okuma ucu istenirse o iş gateway tarafında, her
+tenant'ın yalnız kendi kayıtlarını görebileceği bir yetkilendirmeyle yapılmalı.
 
 ---
 

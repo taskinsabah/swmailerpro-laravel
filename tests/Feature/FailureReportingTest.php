@@ -120,6 +120,37 @@ class FailureReportingTest extends TestCase
     }
 
     #[Test]
+    public function every_recipient_suppressed_is_a_failure_not_a_send_with_an_empty_list(): void
+    {
+        // Dokümanlar uzun süre "tümü elenirse yanıt yine de 200 döner, tek işaret
+        // suppressedRecipients" dedi. Gateway öyle davranmıyor: hepsi elenirse
+        // suppressionCheck 422 döner, suppressed_recipients alanı hiç yazılmaz ve
+        // EmailSent hiç yayınlanmaz. Bu test o iddiayı yerine sabitliyor.
+        Event::fake([EmailSent::class, EmailFailed::class]);
+        Http::fake([
+            '*' => Http::response([
+                'success' => false,
+                'request_id' => 'req_422',
+                'error' => [
+                    'code' => 'ALL_RECIPIENTS_SUPPRESSED',
+                    'message' => 'All recipients are suppressed. Nothing was sent.',
+                ],
+            ], 422),
+        ]);
+
+        try {
+            $this->send();
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('ALL_RECIPIENTS_SUPPRESSED', $e->errorCode);
+            $this->assertSame(422, $e->httpStatus);
+        }
+
+        Event::assertNotDispatched(EmailSent::class);
+        Event::assertDispatched(EmailFailed::class);
+    }
+
+    #[Test]
     public function a_throwing_listener_does_not_turn_a_sent_mail_into_a_failure(): void
     {
         Http::fake(['*' => Http::response(['success' => true, 'data' => []], 200)]);

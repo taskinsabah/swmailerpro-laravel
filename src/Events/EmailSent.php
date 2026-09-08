@@ -22,8 +22,12 @@ class EmailSent
         public readonly bool $queued = false,
         /**
          * @var list<string> Gateway'in engelli listesi yüzünden çıkarılan alıcılar.
-         *                   Tümü çıkarıldıysa bu mail kimseye gitmemiştir — yanıt
-         *                   yine de 200 döner, dolayısıyla tek işaret budur.
+         *                   Yalnızca KISMİ eleme burayı doldurur: mesaj kalan
+         *                   alıcılara gitmiştir. Alıcıların tamamı elenirse gateway
+         *                   422 döner (ALL_RECIPIENTS_SUPPRESSED ya da
+         *                   RESERVED_DOMAIN_RECIPIENTS), yani bu event hiç
+         *                   yayınlanmaz — o durumun işareti EmailFailed ve
+         *                   ApiException'dır.
          */
         public readonly array $suppressedRecipients = [],
     ) {
