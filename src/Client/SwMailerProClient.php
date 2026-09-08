@@ -238,6 +238,13 @@ class SwMailerProClient
             );
         }
 
+        // Zarfın kendisi başarısız diyorsa cevap budur. Yalnızca HTTP koduna
+        // bakmak, success:false taşıyan bir 200'ü gönderilmiş mail sayıyordu —
+        // ve tolere edilen bir 503 için de aynı kör nokta geçerliydi.
+        if (($body['success'] ?? null) === false) {
+            throw ApiException::fromResponse($response);
+        }
+
         return $body;
     }
 

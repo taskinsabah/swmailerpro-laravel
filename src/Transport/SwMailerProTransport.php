@@ -9,6 +9,7 @@ use Illuminate\Support\Str;
 use SabahWeb\SwMailerPro\Client\SwMailerProClient;
 use SabahWeb\SwMailerPro\Events\EmailFailed;
 use SabahWeb\SwMailerPro\Events\EmailSent;
+use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
@@ -47,13 +48,13 @@ class SwMailerProTransport extends AbstractTransport
             // A RawMessage is a MIME blob with no structure to read fields out of;
             // there is no payload we could honestly build from one.
             if (! $original instanceof Message) {
-                throw new \RuntimeException('SwMailerPro: yalnızca Symfony Message tabanlı mailler gönderilebilir.');
+                throw new SwMailerProException('SwMailerPro: yalnızca Symfony Message tabanlı mailler gönderilebilir.');
             }
 
             $email = MessageConverter::toEmail($original);
 
             if (empty($email->getFrom()) || empty($email->getTo())) {
-                throw new \RuntimeException('SwMailerPro: from ve to alanları zorunludur.');
+                throw new SwMailerProException('SwMailerPro: from ve to alanları zorunludur.');
             }
 
             $payload = $this->payloadFactory->fromEmail($email);
@@ -72,10 +73,18 @@ class SwMailerProTransport extends AbstractTransport
                 ? $this->client->sendAsync($payload, $idempotencyKey)
                 : $this->client->send($payload, $idempotencyKey);
         } catch (\Throwable $e) {
-            Event::dispatch(new EmailFailed(
-                payload: $this->forEvent($payload),
-                exception: $e,
-            ));
+            try {
+                Event::dispatch(new EmailFailed(
+                    payload: $this->forEvent($payload),
+                    exception: $e,
+                ));
+            } catch (\Throwable $listenerFailure) {
+                // Gönderim zaten başarısız. Patlayan bir dinleyicinin istisnası
+                // buradan çıkarsa asıl sebebin YERİNE geçiyordu — üstelik onu
+                // previous olarak da taşımadan, yani gerçek hata tamamen
+                // kayboluyordu. Başarı yolunda bu koruma zaten vardı.
+                App::make(ExceptionHandler::class)->report($listenerFailure);
+            }
 
             throw $e;
         }

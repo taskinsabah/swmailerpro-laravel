@@ -151,6 +151,57 @@ class FailureReportingTest extends TestCase
     }
 
     #[Test]
+    public function a_throwing_failure_listener_does_not_replace_the_real_error(): void
+    {
+        // Başarı yolunda bu koruma vardı, hata yolunda yoktu: patlayan bir
+        // EmailFailed dinleyicisinin istisnası asıl ApiException'ın YERİNE
+        // geçiyor, üstelik previous olarak da taşınmadığı için gerçek sebep
+        // tamamen kayboluyordu. Uygulama "audit log down" görüp gateway'in ne
+        // dediğini hiç öğrenemiyordu.
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'error' => ['code' => 'VALIDATION_ERROR', 'message' => 'subject required'],
+        ], 400)]);
+
+        Event::listen(EmailFailed::class, function () {
+            throw new \LogicException('audit log down');
+        });
+
+        try {
+            $this->send();
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('VALIDATION_ERROR', $e->errorCode);
+        } finally {
+            Event::forget(EmailFailed::class);
+        }
+    }
+
+    #[Test]
+    public function a_success_false_envelope_is_a_failure_even_with_a_200(): void
+    {
+        // İstemci yalnızca HTTP koduna bakıyordu. Zarfında success:false taşıyan
+        // bir 200, teslim edilmemiş maili gönderilmiş gibi raporluyordu.
+        Event::fake([EmailSent::class, EmailFailed::class]);
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'request_id' => 'req_200_false',
+            'error' => ['code' => 'PROVIDER_REJECTED', 'message' => 'provider said no'],
+        ], 200)]);
+
+        try {
+            $this->send();
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('PROVIDER_REJECTED', $e->errorCode);
+            $this->assertSame('req_200_false', $e->requestId);
+        }
+
+        Event::assertNotDispatched(EmailSent::class);
+        Event::assertDispatched(EmailFailed::class);
+    }
+
+    #[Test]
     public function a_throwing_listener_does_not_turn_a_sent_mail_into_a_failure(): void
     {
         Http::fake(['*' => Http::response(['success' => true, 'data' => []], 200)]);

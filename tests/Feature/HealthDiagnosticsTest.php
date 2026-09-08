@@ -33,7 +33,7 @@ class HealthDiagnosticsTest extends TestCase
                     'suppression_list_size' => 17,
                     'queue_async_sends' => true,
                     'queue_stats' => ['pending' => 0, 'dead' => 0],
-                    'queue_oldest_pending_ms' => null,
+                    'queue_oldest_pending_ms' => 0,
                     'dead_letter_count' => 0,
                 ], $overrides),
             ], 200),
@@ -62,6 +62,58 @@ class HealthDiagnosticsTest extends TestCase
 
         $this->artisan('swmailerpro:health')
             ->expectsOutputToContain('deploy yarım kalmış')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_schema_ahead_of_the_package_fails_the_check(): void
+    {
+        // Gateway bu değeri gerçekten üretiyor: veritabanı bu paketin
+        // beklediğinden yeniyse schema_status 'ahead' oluyor. Komut yalnızca
+        // 'behind' arıyordu, dolayısıyla eski kodla yeni şemaya bakıp 0 dönüyordu.
+        $this->fakeHealth([
+            'schema_version' => 4,
+            'schema_version_expected' => 3,
+            'schema_status' => 'ahead',
+        ]);
+
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('kod eski kalmış')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_schema_the_gateway_could_not_read_fails_the_check(): void
+    {
+        // getSchemaVersion() patlarsa gateway schema_version null gönderiyor ve
+        // durum 'unknown' oluyor. isset() null için false olduğundan kontrol en
+        // baştan geri dönüyor, bilinmeyen bir şema sağlıklı sayılıyordu.
+        $this->fakeHealth([
+            'schema_version' => null,
+            'schema_version_expected' => 3,
+            'schema_status' => 'unknown',
+        ]);
+
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('Şema sürümü okunamadı')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_queue_the_gateway_could_not_read_fails_the_check(): void
+    {
+        // Kuyruk okuması patladığında gateway üç alanı birlikte null gönderiyor.
+        // Bunları 0 saymak "bekleyen 0, ölü mektup 0" yazdırıyordu: gateway
+        // hiçbir şey bilmediğini söylerken komut her şey yolunda diyordu. Boş bir
+        // kuyruk bu şekli üretemez — gateway o durumda 0 gönderir, null değil.
+        $this->fakeHealth([
+            'queue_stats' => null,
+            'dead_letter_count' => null,
+            'queue_oldest_pending_ms' => null,
+        ]);
+
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('durum okunamadı')
             ->assertExitCode(1);
     }
 

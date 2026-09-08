@@ -118,23 +118,37 @@ class PayloadFactory
         if ($templateId !== null) {
             $payload['template_id'] = $templateId;
             $headers->remove('X-SwMailerPro-Template');
+        }
 
-            $json = $this->headerValue($headers, 'X-SwMailerPro-Data');
-            if ($json !== null) {
-                try {
-                    $payload['template_data'] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-                } catch (\JsonException $e) {
-                    throw new SwMailerProException(
-                        "SwMailerPro: template_data geçersiz JSON — {$e->getMessage()}"
-                    );
-                }
-                $headers->remove('X-SwMailerPro-Data');
+        // Template başlığından BAĞIMSIZ okunuyor. Eskiden yalnızca template
+        // varken tüketiliyordu; tek başına bırakılan bir Data başlığı aşağıdaki
+        // customHeaders'a düşüp gerçek bir mesaj başlığı olarak sağlayıcıya
+        // gidiyordu — yani template değişkenleri teslim edilen mailin
+        // başlıklarında görünüyordu.
+        $json = $this->headerValue($headers, 'X-SwMailerPro-Data');
+        if ($json !== null) {
+            try {
+                $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                throw new SwMailerProException(
+                    "SwMailerPro: template_data geçersiz JSON — {$e->getMessage()}"
+                );
             }
 
-            // Template kullanılıyorsa content opsiyonel
-            if (empty($payload['content'])) {
-                unset($payload['content']);
+            // Template yoksa dolduracağı bir şey de yok; gateway'in de işine
+            // yaramaz. Tüketilir, iletilmez. Bozuk JSON yine de hata verir:
+            // sessizce yutulan bozuk bir kontrol başlığı bu hatanın geri
+            // dönüş yolu.
+            if ($templateId !== null) {
+                $payload['template_data'] = $decoded;
             }
+
+            $headers->remove('X-SwMailerPro-Data');
+        }
+
+        // Template kullanılıyorsa content opsiyonel
+        if ($templateId !== null && empty($payload['content'])) {
+            unset($payload['content']);
         }
 
         // Campaign ID
@@ -210,7 +224,15 @@ class PayloadFactory
         $custom = [];
 
         foreach ($headers->all() as $header) {
-            if (in_array(strtolower($header->getName()), self::DERIVED_HEADERS, true)) {
+            $name = strtolower($header->getName());
+
+            if (in_array($name, self::DERIVED_HEADERS, true)) {
+                continue;
+            }
+
+            // Kontrol başlıkları yukarıda tüketiliyor; bu, biri gözden kaçarsa
+            // sağlayıcıya gitmesini engelleyen ikinci kilit.
+            if (str_starts_with($name, 'x-swmailerpro-')) {
                 continue;
             }
 

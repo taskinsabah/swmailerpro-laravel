@@ -3,6 +3,7 @@
 namespace SabahWeb\SwMailerPro\Tests\Unit;
 
 use PHPUnit\Framework\Attributes\Test;
+use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use SabahWeb\SwMailerPro\Tests\TestCase;
 use Symfony\Component\Mime\Email;
@@ -121,6 +122,38 @@ class PayloadFidelityTest extends TestCase
 
         $this->assertSame("eylul-2026", $payload["headers"]["X-Campaign-Ref"]);
         $this->assertArrayHasKey("References", $payload["headers"]);
+    }
+
+    #[Test]
+    public function a_data_header_without_a_template_is_consumed_not_forwarded(): void
+    {
+        // Data yalnızca Template varken tüketiliyordu. Tek başına bırakıldığında
+        // customHeaders'a düşüp gerçek bir mesaj başlığı olarak sağlayıcıya
+        // gidiyor, yani template değişkenleri teslim edilen mailin başlıklarında
+        // görünüyordu.
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-SwMailerPro-Data', '{"order_id":"12345"}');
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertArrayNotHasKey('X-SwMailerPro-Data', $payload['headers'] ?? []);
+        $this->assertArrayNotHasKey('template_data', $payload);
+
+        foreach (array_keys($payload['headers'] ?? []) as $name) {
+            $this->assertStringNotContainsString('X-SwMailerPro', $name);
+        }
+    }
+
+    #[Test]
+    public function a_malformed_data_header_still_reports_without_a_template(): void
+    {
+        // Sessizce yutulan bozuk bir kontrol başlığı, bu hatanın geri dönüş yolu.
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('X-SwMailerPro-Data', '{bozuk json');
+
+        $this->expectException(SwMailerProException::class);
+
+        $this->factory()->fromEmail($email);
     }
 
     #[Test]

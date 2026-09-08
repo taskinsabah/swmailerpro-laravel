@@ -3,9 +3,23 @@
 namespace SabahWeb\SwMailerPro\Exceptions;
 
 use Illuminate\Http\Client\Response;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 
-class ApiException extends SwMailerProException
+/**
+ * Gateway yanıt verdi ama hata döndü.
+ *
+ * TransportExceptionInterface bilerek burada: Symfony'nin failover ve
+ * round-robin transport'ları yalnızca bu arayüzü yakalıyor, dolayısıyla arayüz
+ * olmadan MAIL_MAILER=failover yedeğe hiç geçmiyordu. Yerel retlerde
+ * (PayloadTooLarge, UnsupportedFeature, ConfigurationException) arayüz
+ * KASITLI olarak yok: onlar "bu mesaj gönderilmemeli" diyor, yedeğe düşmek
+ * o kararın etrafından dolaşıp gateway'in reddettiği maili SMTP'den yollamak
+ * olurdu.
+ */
+class ApiException extends SwMailerProException implements TransportExceptionInterface
 {
+    use TransportFailure;
+
     /**
      * @param array<string, mixed>|null $errorBody Gateway'in döndürdüğü hata gövdesi
      */

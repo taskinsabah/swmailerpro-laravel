@@ -48,26 +48,23 @@ class HealthCommand extends Command
             $this->line("  Sürüm: {$data['version']}");
         }
 
-        $schemaBehind = $this->renderSchema($data);
+        $schemaProblem = $this->renderSchema($data);
         $this->renderProviders($data);
-        $queueStuck = $this->renderQueue($data);
+        $queueProblem = $this->renderQueue($data);
         $this->renderSuppression($data);
 
         $this->newLine();
 
         // A half-finished deploy and a queue nothing is draining both mean
         // "mail is not moving", even while the API answers healthy — so they
-        // fail the command rather than being printed and scrolled past.
-        if ($schemaBehind) {
-            $this->error('Şema sürümü geride: migration çalışmamış, deploy yarım kalmış.');
+        // fail the command rather than being printed and scrolled past. So does
+        // a gateway that cannot read its own state: not knowing is not health.
+        foreach ([$schemaProblem, $queueProblem] as $problem) {
+            if ($problem !== null) {
+                $this->error($problem);
 
-            return self::FAILURE;
-        }
-
-        if ($queueStuck) {
-            $this->error('Kuyrukta bekleyen iş var ama ilerlemiyor — worker çalışmıyor olabilir.');
-
-            return self::FAILURE;
+                return self::FAILURE;
+            }
         }
 
         if ($status === 'healthy') {
@@ -82,23 +79,45 @@ class HealthCommand extends Command
     }
 
     /**
+     * Şema satırını yazar ve varsa sorunu döndürür.
+     *
+     * Eskiden yalnızca 'behind' hata sayılıyordu. Gateway iki durum daha
+     * üretiyor: sürüm beklenenden yeniyse 'ahead' (kod eski kalmış), sürümü
+     * hiç okuyamadıysa 'unknown' ve schema_version null. isset() null için
+     * false olduğundan 'unknown' dalı en baştan geri dönüyor, komut da hiçbir
+     * şey bilmediği bir şema için 0 ile çıkıyordu.
+     *
      * @param array<string, mixed> $data
-     * @return bool Şema geride mi
+     * @return string|null Şemayla ilgili sorun; yoksa null
      */
-    protected function renderSchema(array $data): bool
+    protected function renderSchema(array $data): ?string
     {
-        if (! isset($data['schema_version'], $data['schema_version_expected'])) {
-            return false;
+        if (! array_key_exists('schema_version', $data) || ! array_key_exists('schema_version_expected', $data)) {
+            return null;
         }
 
-        $schemaStatus = $data['schema_status'] ?? 'unknown';
+        $version = $data['schema_version'];
+        $expected = $data['schema_version_expected'];
+        $schemaStatus = is_string($data['schema_status'] ?? null) ? $data['schema_status'] : 'unknown';
         $color = $schemaStatus === 'current' ? 'green' : 'red';
+        $shown = is_scalar($version) ? (string) $version : '?';
+        $shownExpected = is_scalar($expected) ? (string) $expected : '?';
 
-        $this->line(
-            "  Şema: <fg={$color}>{$data['schema_version']}/{$data['schema_version_expected']} ({$schemaStatus})</>"
-        );
+        $this->line("  Şema: <fg={$color}>{$shown}/{$shownExpected} ({$schemaStatus})</>");
 
-        return $schemaStatus === 'behind';
+        if ($version === null || $schemaStatus === 'unknown') {
+            return 'Şema sürümü okunamadı: gateway veritabanına erişemiyor.';
+        }
+
+        if ($schemaStatus === 'behind' || (is_int($version) && is_int($expected) && $version < $expected)) {
+            return 'Şema sürümü geride: migration çalışmamış, deploy yarım kalmış.';
+        }
+
+        if ($schemaStatus === 'ahead' || (is_int($version) && is_int($expected) && $version > $expected)) {
+            return 'Şema sürümü ileride: veritabanı bu paketin beklediğinden yeni, kod eski kalmış.';
+        }
+
+        return null;
     }
 
     /**
@@ -127,13 +146,30 @@ class HealthCommand extends Command
     }
 
     /**
+     * Kuyruk satırını yazar ve varsa sorunu döndürür.
+     *
+     * Gateway kuyruğu okuyamadığında queue_stats, dead_letter_count ve
+     * queue_oldest_pending_ms alanlarını birlikte null gönderiyor. Bunları 0
+     * saymak "bekleyen 0, ölü mektup 0" yazdırıyordu: gateway hiçbir şey
+     * bilmediğini söylerken komut her şeyin yolunda olduğunu bildiriyordu.
+     * Boş kuyruk bu şekli hiç üretmez — getOldestPendingAgeMs() bekleyen iş
+     * yokken null değil 0 döner.
+     *
      * @param array<string, mixed> $data
-     * @return bool Kuyruk tıkanmış görünüyor mu
+     * @return string|null Kuyrukla ilgili sorun; yoksa null
      */
-    protected function renderQueue(array $data): bool
+    protected function renderQueue(array $data): ?string
     {
         if (! array_key_exists('queue_async_sends', $data)) {
-            return false;
+            return null;
+        }
+
+        $mode = $data['queue_async_sends'] ? 'kuyruklu' : 'doğrudan';
+
+        if ($this->queueUnreadable($data)) {
+            $this->line("  Kuyruk: {$mode} — <fg=red>durum okunamadı</>");
+
+            return 'Gateway kuyruk durumunu okuyamadı — kuyruğun ilerleyip ilerlemediği bilinmiyor.';
         }
 
         $stats = is_array($data['queue_stats'] ?? null) ? $data['queue_stats'] : [];
@@ -141,7 +177,6 @@ class HealthCommand extends Command
         $dead = (int) ($data['dead_letter_count'] ?? $stats['dead'] ?? 0);
         $oldestMs = $data['queue_oldest_pending_ms'] ?? null;
 
-        $mode = $data['queue_async_sends'] ? 'kuyruklu' : 'doğrudan';
         $this->line("  Kuyruk: {$mode} — bekleyen {$pending}, ölü mektup {$dead}");
 
         if ($dead > 0) {
@@ -149,7 +184,7 @@ class HealthCommand extends Command
         }
 
         if ($oldestMs === null) {
-            return false;
+            return null;
         }
 
         $oldestSeconds = (int) round(((int) $oldestMs) / 1000);
@@ -159,7 +194,23 @@ class HealthCommand extends Command
 
         // Five minutes is far past a healthy poll cycle; at that point the
         // queue is not slow, it is unattended.
-        return $pending > 0 && $oldestSeconds > 300;
+        return $pending > 0 && $oldestSeconds > 300
+            ? 'Kuyrukta bekleyen iş var ama ilerlemiyor — worker çalışmıyor olabilir.'
+            : null;
+    }
+
+    /**
+     * Gateway kuyruk durumunu okuyamamış mı.
+     *
+     * İki alanı birlikte arıyoruz: gateway üçünü tek try/catch içinde
+     * dolduruyor, dolayısıyla okuma patladıysa ikisi de null olur.
+     *
+     * @param array<string, mixed> $data
+     */
+    protected function queueUnreadable(array $data): bool
+    {
+        return array_key_exists('queue_stats', $data) && $data['queue_stats'] === null
+            && array_key_exists('dead_letter_count', $data) && $data['dead_letter_count'] === null;
     }
 
     /**

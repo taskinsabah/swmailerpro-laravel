@@ -292,10 +292,17 @@ php artisan swmailerpro:health
 Çıktı: durum, uptime, sürüm, şema sürümü, provider tablosu (circuit breaker ve hata oranıyla),
 kuyruk derinliği ve en eski bekleyen iş, ölü mektup sayısı, engelli adres sayısı.
 
-Komut iki durumda **exit 1** döner — ikisi de gateway "healthy" derken maili durdurur:
+Komut şu durumlarda **exit 1** döner — hepsi gateway "healthy" derken maili durdurur:
 
 - **Şema geride**: migration çalışmamış, deploy yarım kalmış.
+- **Şema ileride**: veritabanı bu paketin beklediğinden yeni, kod eski kalmış.
+- **Şema okunamadı**: gateway veritabanına erişemiyor (`schema_version: null`).
 - **Kuyruk ilerlemiyor**: bekleyen iş var ve en eskisi 5 dakikayı geçmiş (worker durmuş olabilir).
+- **Kuyruk durumu okunamadı**: gateway kuyruğu okuyamadığını bildiriyor. Eskiden bu "bekleyen 0,
+  ölü mektup 0" diye yazılıp exit 0 dönüyordu — bilmemek sağlık sayılmaz.
+
+> Deploy hattınız bu komutu kapı olarak kullanıyorsa: son üç madde yeni. Daha önce sessizce
+> geçen bir gateway artık hattı durdurabilir; amaç budur.
 
 ### `swmailerpro:test`
 
@@ -448,7 +455,11 @@ try {
     $e->requestId;   // Gateway loglarında bu isteği bulmak için
     $e->getMessage(); // "SwMailerPro API Error [CODE]: message"
 } catch (ConnectionFailedException $e) {
-    // Gateway'e hiç ulaşılamadı: DNS, TLS, bağlantı ya da yanıt zaman aşımı
+    // Gateway'e hiç ulaşılamadı: DNS, TLS, bağlantı ya da yanıt zaman aşımı.
+    // Bu ve ApiException, Symfony'nin transport sözleşmesini uygular — yani
+    // MAIL_MAILER=failover altında yedek taşıyıcı denenir. Yerel retler
+    // (PayloadTooLarge, UnsupportedFeature) bilerek uygulamaz: onlar
+    // "bu mesaj gönderilmemeli" der, yedeğe düşmek o kararı delerdi.
 } catch (UnsupportedFeatureException $e) {
     // Paketin desteklemediği bir yetenek istendi (bugün: non-transactional
     // gönderim). İstek ağa hiç çıkmadı; tekrar denemek düzeltmez.
