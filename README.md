@@ -493,6 +493,10 @@ tekrarlar. Tavan varsayılan **5 saniye**, `client.max_retry_after` ve
 `Retry-After` beklenmez" demektir. Başlık taşımayan bir 5xx bu kuralın dışındadır;
 normal backoff ile denenir.
 
+Başlığın her iki RFC 7231 biçimi de okunur: saniye (`Retry-After: 30`) ve HTTP tarihi
+(`Retry-After: Wed, 21 Oct 2015 07:28:00 GMT`). Okunamayan bir değer, başlık hiç
+yokmuş gibi ele alınır.
+
 Her gönderim isteği bir `Idempotency-Key` taşır (mesajın Message-ID'si). Aynı mesajın her
 denemesi aynı anahtarı kullanır, dolayısıyla gateway'in kabul ettiği bir mail zaman aşımı
 sonrası tekrar denendiğinde ikinci kez gönderilmez. Kuyruktaki bir job yeniden denendiğinde

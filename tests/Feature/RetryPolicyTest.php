@@ -235,4 +235,153 @@ class RetryPolicyTest extends TestCase
         );
         Sleep::assertNeverSlept();
     }
+    #[Test]
+    public function a_retry_after_date_is_waited_out_like_a_delay_in_seconds(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'RATE_LIMIT']],
+                    429,
+                    ['Retry-After' => gmdate('D, d M Y H:i:s', time() + 2) . ' GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'RFC bir tarihe de izin veriyor; o da bir beklemedir');
+        Sleep::assertSlept(fn ($duration) => $duration->totalMilliseconds > 0);
+    }
+
+    #[Test]
+    public function an_obsolete_rfc_850_date_is_read_too(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'RATE_LIMIT']],
+                    429,
+                    ['Retry-After' => gmdate('l, d-M-y H:i:s', time() + 2) . ' GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'RFC üç biçim sayıyor; eskimiş olan da geçerli');
+    }
+
+    #[Test]
+    public function a_far_future_retry_after_date_is_handed_back_instead_of_blocking(): void
+    {
+        Http::fake([
+            '*' => Http::response(
+                ['success' => false, 'error' => ['code' => 'INTERNAL', 'message' => 'overloaded']],
+                503,
+                ['Retry-After' => gmdate('D, d M Y H:i:s', time() + 600) . ' GMT'],
+            ),
+        ]);
+
+        $this->expectException(ApiException::class);
+
+        try {
+            $this->client()->send($this->payload());
+        } finally {
+            $this->assertSame(
+                1,
+                $this->attempts(),
+                'tarih biçimi tavandan kaçış yolu olmamalı',
+            );
+            Sleep::assertNeverSlept();
+        }
+    }
+
+    #[Test]
+    public function an_asctime_date_is_read_as_gmt_whatever_the_app_timezone_is(): void
+    {
+        $previous = date_default_timezone_get();
+        date_default_timezone_set('Europe/Istanbul');
+
+        try {
+            Http::fake([
+                '*' => Http::sequence()
+                    ->push(
+                        ['success' => false, 'error' => ['code' => 'RATE_LIMIT']],
+                        429,
+                        ['Retry-After' => gmdate('D M j H:i:s Y', time() + 2)],
+                    )
+                    ->push(['success' => true, 'data' => []], 200),
+            ]);
+
+            $this->client()->send($this->payload());
+
+            $this->assertSame(
+                2,
+                $this->attempts(),
+                'asctime saat dilimi taşımaz; yerel saatle okunursa gelecek bir tarih geçmişe düşer',
+            );
+        } finally {
+            date_default_timezone_set($previous);
+        }
+    }
+
+    #[Test]
+    public function a_date_with_the_wrong_weekday_is_still_read_by_its_date(): void
+    {
+        $at = time() + 2;
+        $wrongDay = gmdate('D', strtotime('+1 day', $at));
+
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'RATE_LIMIT']],
+                    429,
+                    ['Retry-After' => $wrongDay . ', ' . gmdate('d M Y H:i:s', $at) . ' GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(
+            2,
+            $this->attempts(),
+            'gün adı RFC\'de yedek bilgi; tutmayınca tarihi günlerce ileri kaydırmamalı',
+        );
+    }
+
+    #[Test]
+    public function an_unreadable_retry_after_falls_back_to_the_normal_backoff(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['success' => false, 'error' => ['code' => 'INTERNAL']], 500, ['Retry-After' => 'Wed,'])
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'yarım bir başlık, gelecek çarşambaya kadar bekleme emri değildir');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
+    }
+
+    #[Test]
+    public function a_retry_after_date_in_the_past_falls_back_to_the_normal_backoff(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'INTERNAL']],
+                    500,
+                    ['Retry-After' => gmdate('D, d M Y H:i:s', time() - 60) . ' GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'geçmiş bir tarih "bekleme" demektir, "vazgeç" değil');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
+    }
 }

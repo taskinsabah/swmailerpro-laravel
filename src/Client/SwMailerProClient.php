@@ -391,6 +391,11 @@ class SwMailerProClient
 
     /**
      * Retry-After değeri (saniye). Başlık yoksa ya da okunamıyorsa 0.
+     *
+     * RFC 7231 iki biçime izin veriyor: saniye ve bir HTTP tarihi. Tarihi de
+     * saniyeye çeviriyoruz ki çağıran tek bir sayıya bakarak karar versin.
+     * Tavan burada uygulanmaz — 429 dalının "sunucu on dakika istedi, o zaman
+     * hiç denemeyelim" diyebilmesi için ham değere ihtiyacı var.
      */
     protected function retryAfterSeconds(\Throwable $e): int
     {
@@ -398,9 +403,54 @@ class SwMailerProClient
             return 0;
         }
 
-        $header = $e->response->header('Retry-After');
+        // header() her zaman string döner: başlık yoksa boş, iki kez
+        // gönderilmişse "1, 600" diye birleşmiş. İkisi de hiçbir biçime
+        // uymaz ve aşağıda kendiliğinden 0'a düşer.
+        $header = trim($e->response->header('Retry-After'));
 
-        return is_numeric($header) ? max(0, (int) $header) : 0;
+        if (is_numeric($header)) {
+            return max(0, (int) $header);
+        }
+
+        $at = $this->httpDateTimestamp($header);
+
+        // Geçmiş bir tarih "beklemeye gerek yok" demek, "vazgeç" değil.
+        return $at === null ? 0 : max(0, $at - time());
+    }
+
+    /**
+     * RFC 7231'in üç tarih biçimi → unix damgası, okunamıyorsa null.
+     *
+     * strtotime yerine sabit biçimler, üçü de ölçülmüş sebeplerle: asctime
+     * saat dilimi taşımıyor ve strtotime onu sunucunun yerel saatiyle okuyor —
+     * Istanbul'da tarih üç saat geriye kayıyor, yani gelecekteki bir tarih
+     * geçmiş görünüp başlık sessizce düşüyor. İkincisi, "Wed," gibi yarım bir
+     * metni strtotime gelecek çarşambaya çeviriyor; bozuk bir başlıktan
+     * günlerce bekleme çıkmamalı. Üçüncüsü, sondaki çöpü de yutuyor.
+     *
+     * Gün adı bilerek '*' ile atlanıyor: RFC'de yedek bilgi, ama tutmadığında
+     * ayrıştırıcı tarihi o güne ileri kaydırıyor (yanlış gün adı taşıyan bir
+     * IMF-fixdate beş gün sonrasına gidiyor).
+     */
+    protected function httpDateTimestamp(string $value): ?int
+    {
+        $gmt = new \DateTimeZone('GMT');
+
+        $formats = [
+            '!*, d M Y H:i:s \G\M\T', // IMF-fixdate
+            '!*, d-M-y H:i:s T',      // RFC 850 — eskimiş
+            '!* M j H:i:s Y',         // asctime — eskimiş, saat dilimi yok
+        ];
+
+        foreach ($formats as $format) {
+            $parsed = \DateTimeImmutable::createFromFormat($format, $value, $gmt);
+
+            if ($parsed !== false) {
+                return $parsed->getTimestamp();
+            }
+        }
+
+        return null;
     }
 
     /**
