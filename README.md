@@ -42,6 +42,7 @@ SWMAILERPRO_KEY=your-tenant-api-key
 | `transport` | Mailable gönderimlerinde timeout/retry |
 | `client` | Facade/direct API kullanımında timeout/retry |
 | `idempotency` | Gönderim isteklerine `Idempotency-Key` eklenir (varsayılan açık) |
+| `limits` | Gateway tavanlarının kopyası — aşan payload hiç gönderilmez |
 | `defaults` | `async`, `tracking.open`, `tracking.click` |
 
 ```php
@@ -65,6 +66,17 @@ return [
     // Tekrar denemeyi güvenli kılan şey: gateway aynı anahtarla gelen ikinci
     // isteği ilk yanıtı döndürerek karşılar, maili tekrar göndermez.
     'idempotency' => env('SWMAILERPRO_IDEMPOTENCY', true),
+
+    // Gateway'in kendi sınırları. Aşan bir payload ağa hiç çıkmaz —
+    // gateway zaten reddedecek, ama ancak 20 MB yüklendikten sonra.
+    // Bir tavanı 0 yapmak o kontrolü kapatır.
+    'limits' => [
+        'attachments' => 10,
+        'attachment_bytes' => 10 * 1024 * 1024,
+        'attachments_total_bytes' => 15 * 1024 * 1024,
+        'personalizations' => 1000,
+        'body_bytes' => 20 * 1024 * 1024,
+    ],
 
     'defaults' => [
         'async' => false,
@@ -313,6 +325,11 @@ class HandleEmailSent
         //                     (async gönderimde 202). Teslimat webhook ile bildirilir.
         // $event->suppressedRecipients — engelli listedeki alıcılar çıkarıldı.
         //                     Tümü çıkarıldıysa bu mail kimseye gitmemiştir.
+        //
+        // Not: payload'daki ek içerikleri event'e KONULMAZ ('content' => null,
+        // yerine 'size_bytes'). Kuyruğa alınmış bir dinleyici event'i serialize
+        // eder; 10 MB'lık bir ek jobs/failed_jobs tablosuna ~14 MB olarak yazılırdı.
+        // Gateway'e giden mail elbette eki tam olarak taşır.
         
         Log::info('Email sent', [
             'to' => $event->payload['personalizations'][0]['to'][0]['email'] ?? null,

@@ -38,6 +38,7 @@ class SwMailerProServiceProvider extends ServiceProvider
                 retry: $config['client']['retry'] ?? ['times' => 2, 'sleep' => 200],
                 connectTimeout: (int) ($config['client']['connect_timeout'] ?? 10),
                 idempotency: (bool) ($config['idempotency'] ?? true),
+                limits: (array) ($config['limits'] ?? []),
             );
         });
 
@@ -78,6 +79,7 @@ class SwMailerProServiceProvider extends ServiceProvider
                 retry: (array) ($transportConfig['retry'] ?? ['times' => 2, 'sleep' => 200]),
                 connectTimeout: (int) ($transportConfig['connect_timeout'] ?? 10),
                 idempotency: (bool) ($swConfig['idempotency'] ?? true),
+                limits: (array) ($swConfig['limits'] ?? []),
             );
 
             return new SwMailerProTransport(

@@ -73,7 +73,7 @@ class SwMailerProTransport extends AbstractTransport
                 : $this->client->send($payload, $idempotencyKey);
         } catch (\Throwable $e) {
             Event::dispatch(new EmailFailed(
-                payload: $payload,
+                payload: $this->forEvent($payload),
                 exception: $e,
             ));
 
@@ -107,7 +107,7 @@ class SwMailerProTransport extends AbstractTransport
 
         try {
             Event::dispatch(new EmailSent(
-                payload: $payload,
+                payload: $this->forEvent($payload),
                 response: $response,
                 requestId: is_string($requestId) ? $requestId : null,
                 queued: $async,
@@ -119,6 +119,39 @@ class SwMailerProTransport extends AbstractTransport
             // queue would retry a message the gateway has already delivered.
             App::make(ExceptionHandler::class)->report($e);
         }
+    }
+
+    /**
+     * Event'e giden payload: ek içerikleri çıkarılmış hâli.
+     *
+     * Kuyruğa alınmış bir dinleyici event'i serialize eder, yani base64 ekler
+     * `jobs` ve `failed_jobs` tablolarına satır olarak yazılır — 10 MB'lık bir ek
+     * ~14 MB base64 demek ve bu bir MySQL paket sınırına çarpar. Dinleyicinin
+     * ihtiyacı olan ekin kendisi değil, ne olduğu: isim, tip, boyut yerinde kalır.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    protected function forEvent(array $payload): array
+    {
+        if (! is_array($payload['attachments'] ?? null)) {
+            return $payload;
+        }
+
+        foreach ($payload['attachments'] as $i => $attachment) {
+            if (! is_array($attachment) || ! is_string($attachment['content'] ?? null)) {
+                continue;
+            }
+
+            $encoded = $attachment['content'];
+            $payload['attachments'][$i]['content'] = null;
+            $payload['attachments'][$i]['size_bytes'] = max(
+                0,
+                intdiv(strlen($encoded) * 3, 4) - substr_count(substr($encoded, -2), '='),
+            );
+        }
+
+        return $payload;
     }
 
     /**

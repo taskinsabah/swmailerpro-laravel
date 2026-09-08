@@ -74,6 +74,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Boyut Tavanları
+    |--------------------------------------------------------------------------
+    |
+    | Gateway'in kendi sınırlarının kopyası. Payload bunları aşıyorsa istek hiç
+    | gönderilmez: gateway zaten reddedecek, ama ancak gövdenin tamamı
+    | yüklendikten sonra — yavaş bir bağlantıda 20 MB boşa gider.
+    |
+    | Gateway sınırları değişirse burayı güncelleyin. Bir tavanı 0 yapmak o
+    | kontrolü kapatır (kontrolü gateway yapmaya devam eder).
+    |
+    */
+
+    'limits' => [
+        'attachments' => 10,
+        'attachment_bytes' => 10 * 1024 * 1024,
+        'attachments_total_bytes' => 15 * 1024 * 1024,
+        'personalizations' => 1000,
+        'body_bytes' => 20 * 1024 * 1024,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Varsayılan Değerler
     |--------------------------------------------------------------------------
     |

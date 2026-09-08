@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
 use SabahWeb\SwMailerPro\Exceptions\ConnectionFailedException;
+use SabahWeb\SwMailerPro\Exceptions\PayloadTooLargeException;
 
 /**
  * SwMailerPro Gateway HTTP client.
@@ -45,8 +46,27 @@ class SwMailerProClient
          * the header — leaving it off means a retried timeout can send twice.
          */
         protected readonly bool $idempotency = true,
+        /**
+         * @var array<string, int> Gateway'in kendi tavanlarının kopyası. Burada
+         *      erken yakalamak, reddedileceği kesin olan 20 MB'lık bir yüklemeyi
+         *      hiç yapmamak demek. Bir tavanı 0 yapmak o kontrolü kapatır.
+         */
+        protected readonly array $limits = [],
     ) {
     }
+
+    /**
+     * Gateway tavanlarının paket içindeki varsayılanları.
+     *
+     * @var array<string, int>
+     */
+    protected const DEFAULT_LIMITS = [
+        'attachments' => 10,
+        'attachment_bytes' => 10485760,
+        'attachments_total_bytes' => 15728640,
+        'personalizations' => 1000,
+        'body_bytes' => 20971520,
+    ];
 
     /**
      * Senkron mail gönderimi.
@@ -58,6 +78,8 @@ class SwMailerProClient
      */
     public function send(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardSize($payload);
+
         return $this->request('POST', '/api/v1/email/send', $payload, $idempotencyKey);
     }
 
@@ -70,6 +92,8 @@ class SwMailerProClient
      */
     public function sendAsync(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardSize($payload);
+
         return $this->request('POST', '/api/v1/email/send-async', $payload, $idempotencyKey);
     }
 
@@ -82,6 +106,8 @@ class SwMailerProClient
      */
     public function sendTest(array $payload, ?string $idempotencyKey = null): array
     {
+        $this->guardSize($payload);
+
         return $this->request('POST', '/api/v1/email/send-test', $payload, $idempotencyKey);
     }
 
@@ -209,6 +235,89 @@ class SwMailerProClient
         }
 
         return $body;
+    }
+
+    /**
+     * Gateway'in reddedeceği bir payload'ı yüklemeden önce reddeder.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws PayloadTooLargeException
+     */
+    protected function guardSize(array $payload): void
+    {
+        $attachments = is_array($payload['attachments'] ?? null) ? $payload['attachments'] : [];
+
+        $this->assertWithin('attachments', count($attachments), 'ek sayısı');
+
+        $personalizations = is_array($payload['personalizations'] ?? null) ? $payload['personalizations'] : [];
+        $this->assertWithin('personalizations', count($personalizations), 'personalization sayısı');
+
+        $total = 0;
+
+        foreach ($attachments as $attachment) {
+            if (! is_array($attachment) || ! is_string($attachment['content'] ?? null)) {
+                continue;
+            }
+
+            $size = $this->decodedSize($attachment['content']);
+            $total += $size;
+            $name = is_string($attachment['filename'] ?? null) ? $attachment['filename'] : '(isimsiz)';
+
+            $this->assertWithin('attachment_bytes', $size, "ek boyutu ({$name})");
+        }
+
+        $this->assertWithin('attachments_total_bytes', $total, 'toplam ek boyutu');
+
+        // Gövde tahmini: json_encode etmeden, taşıyan iki terimi toplayarak.
+        // Amaç kesin bayt sayısı değil, 20 MB tavanına çarpacağı belli olan
+        // bir isteği ağa hiç çıkarmamak.
+        $body = $total;
+        foreach ((is_array($payload['content'] ?? null) ? $payload['content'] : []) as $part) {
+            if (is_array($part) && is_string($part['value'] ?? null)) {
+                $body += strlen($part['value']);
+            }
+        }
+
+        $this->assertWithin('body_bytes', $body, 'mesaj boyutu');
+    }
+
+    /**
+     * Tavanı aşan değeri, hangi tavan olduğunu söyleyerek reddeder.
+     * Tavan 0 (ya da eksi) ise kontrol kapalıdır.
+     */
+    protected function assertWithin(string $limit, int $value, string $label): void
+    {
+        $ceiling = $this->limits[$limit] ?? self::DEFAULT_LIMITS[$limit] ?? 0;
+
+        if ($ceiling <= 0 || $value <= $ceiling) {
+            return;
+        }
+
+        throw new PayloadTooLargeException(sprintf(
+            'SwMailerPro: %s sınırı aşıyor (%s > %s). Gateway bunu zaten reddederdi; istek gönderilmedi.',
+            $label,
+            $this->human($value),
+            $this->human($ceiling),
+        ));
+    }
+
+    /**
+     * base64 metninin çözülmüş bayt karşılığı — decode etmeden, bellek harcamadan.
+     */
+    protected function decodedSize(string $base64): int
+    {
+        $clean = preg_replace('/s+/', '', $base64) ?? $base64;
+        $padding = substr_count(substr($clean, -2), '=');
+
+        return max(0, intdiv(strlen($clean) * 3, 4) - $padding);
+    }
+
+    protected function human(int $value): string
+    {
+        return $value >= 1024 * 1024
+            ? round($value / 1024 / 1024, 1) . ' MB'
+            : (string) $value;
     }
 
     /**
