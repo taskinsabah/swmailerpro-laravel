@@ -17,9 +17,30 @@ class TestCommand extends Command
 
     protected $description = 'SwMailerPro üzerinden test e-postası gönderir';
 
-    public function handle(SwMailerProClient $client): int
+    /**
+     * Konsol seçenekleri string değil mixed döner (bayrak, dizi, null olabilir).
+     * String olmayanı boş kabul ediyoruz — komut zaten boşluğu kontrol ediyor.
+     */
+    protected function stringOption(string $name): string
     {
-        $to = $this->option('to');
+        $value = $this->option($name);
+
+        return is_string($value) ? $value : '';
+    }
+
+    /**
+     * Config değerleri de mixed; string olmayan bir ayar burada boş sayılır.
+     */
+    protected function configString(string $key): string
+    {
+        $value = config($key);
+
+        return is_string($value) ? $value : '';
+    }
+
+    public function handle(SwMailerProClient $client, PayloadFactory $payloadFactory): int
+    {
+        $to = $this->stringOption('to');
 
         if (empty($to)) {
             $this->error('--to parametresi zorunludur.');
@@ -31,16 +52,16 @@ class TestCommand extends Command
             return self::FAILURE;
         }
 
-        $from = $this->option('from') ?: config('swmailerpro.defaults.from_email') ?: config('mail.from.address');
-        $fromName = config('mail.from.name', 'SwMailerPro');
-        $subject = $this->option('subject') ?: 'SwMailerPro Test E-postası';
+        $from = $this->stringOption('from') ?: $this->configString('swmailerpro.defaults.from_email') ?: $this->configString('mail.from.address');
+        $fromName = $this->configString('mail.from.name') ?: 'SwMailerPro';
+        $subject = $this->stringOption('subject') ?: 'SwMailerPro Test E-postası';
 
         if (empty($from)) {
             $this->error('Gönderici adresi belirtilmedi. --from parametresi kullanın veya config ayarlayın.');
             return self::FAILURE;
         }
 
-        $payload = PayloadFactory::fromArray([
+        $payload = $payloadFactory->fromArray([
             'from' => [
                 'email' => $from,
                 'name' => $fromName,

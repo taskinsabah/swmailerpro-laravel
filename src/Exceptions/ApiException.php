@@ -6,6 +6,9 @@ use Illuminate\Http\Client\Response;
 
 class ApiException extends SwMailerProException
 {
+    /**
+     * @param array<string, mixed>|null $errorBody Gateway'in döndürdüğü hata gövdesi
+     */
     public function __construct(
         string $message,
         public readonly string $errorCode,

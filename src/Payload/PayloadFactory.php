@@ -4,6 +4,7 @@ namespace SabahWeb\SwMailerPro\Payload;
 
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Header\Headers;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
 
@@ -27,7 +28,6 @@ class PayloadFactory
     {
         $payload = [
             'from' => $this->formatAddress($email->getFrom()[0]),
-            'subject' => $email->getSubject(),
             'personalizations' => [
                 [
                     'to' => $this->formatAddresses($email->getTo()),
@@ -35,6 +35,14 @@ class PayloadFactory
             ],
             'content' => [],
         ];
+
+        // Sent only when there is one. The gateway's schema accepts a string or
+        // the absent key — a null subject is a 400, which is what a template
+        // send (legitimately subject-less here) used to produce.
+        $subject = $email->getSubject();
+        if ($subject !== null && $subject !== '') {
+            $payload['subject'] = $subject;
+        }
 
         // CC
         if ($cc = $email->getCc()) {
@@ -72,11 +80,32 @@ class PayloadFactory
         if (count($attachments) > 0) {
             $payload['attachments'] = [];
             foreach ($attachments as $attachment) {
-                $payload['attachments'][] = [
+                $entry = [
                     'content' => base64_encode($attachment->getBody()),
                     'filename' => $attachment->getFilename() ?? 'attachment',
                     'type' => $this->getAttachmentMimeType($attachment),
                 ];
+
+                // An embedded image only renders as an image if the gateway is told
+                // it is inline and which cid the HTML points at. Dropping these two
+                // fields turned every <img src="cid:..."> into a broken image and a
+                // stray file attachment.
+                $disposition = $attachment->getDisposition();
+                if ($disposition === 'inline' || $disposition === 'attachment') {
+                    $entry['disposition'] = $disposition;
+                }
+
+                // Laravel's $message->embed() stamps a cid and puts it in the HTML,
+                // so it is there to copy. Symfony's own Email::embed() instead lets
+                // the HTML say cid:<name> and resolves it at render time — which we
+                // bypass, so the filename has to stand in as the id.
+                if ($attachment->hasContentId()) {
+                    $entry['content_id'] = $attachment->getContentId();
+                } elseif ($disposition === 'inline' && $attachment->getFilename() !== null) {
+                    $entry['content_id'] = $attachment->getFilename();
+                }
+
+                $payload['attachments'][] = $entry;
             }
         }
 
@@ -84,12 +113,13 @@ class PayloadFactory
         $headers = $email->getHeaders();
 
         // Template desteği
-        if ($headers->has('X-SwMailerPro-Template')) {
-            $payload['template_id'] = $headers->get('X-SwMailerPro-Template')->getBodyAsString();
+        $templateId = $this->headerValue($headers, 'X-SwMailerPro-Template');
+        if ($templateId !== null) {
+            $payload['template_id'] = $templateId;
             $headers->remove('X-SwMailerPro-Template');
 
-            if ($headers->has('X-SwMailerPro-Data')) {
-                $json = $headers->get('X-SwMailerPro-Data')->getBodyAsString();
+            $json = $this->headerValue($headers, 'X-SwMailerPro-Data');
+            if ($json !== null) {
                 try {
                     $payload['template_data'] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
                 } catch (\JsonException $e) {
@@ -107,21 +137,76 @@ class PayloadFactory
         }
 
         // Campaign ID
-        if ($headers->has('X-SwMailerPro-Campaign')) {
-            $payload['campaign_id'] = $headers->get('X-SwMailerPro-Campaign')->getBodyAsString();
+        $campaignId = $this->headerValue($headers, 'X-SwMailerPro-Campaign');
+        if ($campaignId !== null) {
+            $payload['campaign_id'] = $campaignId;
             $headers->remove('X-SwMailerPro-Campaign');
         }
 
         // Transactional flag
-        if ($headers->has('X-SwMailerPro-Transactional')) {
-            $payload['transactional'] = filter_var(
-                $headers->get('X-SwMailerPro-Transactional')->getBodyAsString(),
-                FILTER_VALIDATE_BOOLEAN
-            );
+        $transactional = $this->headerValue($headers, 'X-SwMailerPro-Transactional');
+        if ($transactional !== null) {
+            $payload['transactional'] = filter_var($transactional, FILTER_VALIDATE_BOOLEAN);
             $headers->remove('X-SwMailerPro-Transactional');
         }
 
+        // Whatever the application set itself — List-Unsubscribe, X-Priority, a
+        // correlation id — travels with the message. Read last, so the
+        // X-SwMailerPro-* control headers above have already been removed and
+        // never leak to the provider.
+        $custom = $this->customHeaders($headers);
+        if ($custom !== []) {
+            $payload['headers'] = $custom;
+        }
+
         return $payload;
+    }
+
+    /**
+     * Headers the gateway derives from the payload itself. Forwarding them
+     * would duplicate or fight what it sets from from/personalizations/content.
+     */
+    private const DERIVED_HEADERS = [
+        'from',
+        'to',
+        'cc',
+        'bcc',
+        'reply-to',
+        'sender',
+        'return-path',
+        'subject',
+        'date',
+        'message-id',
+        'mime-version',
+        'content-type',
+        'content-transfer-encoding',
+        'content-disposition',
+    ];
+
+    /**
+     * Bir başlığın gövdesi; başlık yoksa null.
+     */
+    protected function headerValue(Headers $headers, string $name): ?string
+    {
+        return $headers->get($name)?->getBodyAsString();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function customHeaders(Headers $headers): array
+    {
+        $custom = [];
+
+        foreach ($headers->all() as $header) {
+            if (in_array(strtolower($header->getName()), self::DERIVED_HEADERS, true)) {
+                continue;
+            }
+
+            $custom[$header->getName()] = $header->getBodyAsString();
+        }
+
+        return $custom;
     }
 
     /**
