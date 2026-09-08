@@ -418,4 +418,36 @@ class PayloadFactoryTest extends TestCase
             ],
         ];
     }
+    #[Test]
+    public function from_email_leaves_the_callers_message_as_it_found_it(): void
+    {
+        $email = $this->makeEmail();
+        $headers = $email->getHeaders();
+        $headers->addTextHeader('X-SwMailerPro-Template', 'tpl_1');
+        $headers->addTextHeader('X-SwMailerPro-Data', '{"ad":"Ali"}');
+        $headers->addTextHeader('X-SwMailerPro-Campaign', 'camp_1');
+        $headers->addTextHeader('X-SwMailerPro-Transactional', 'true');
+
+        $this->factory->fromEmail($email);
+
+        $this->assertTrue($email->getHeaders()->has('X-SwMailerPro-Template'));
+        $this->assertTrue($email->getHeaders()->has('X-SwMailerPro-Data'));
+        $this->assertTrue($email->getHeaders()->has('X-SwMailerPro-Campaign'));
+        $this->assertTrue($email->getHeaders()->has('X-SwMailerPro-Transactional'));
+    }
+
+    #[Test]
+    public function the_same_message_yields_the_same_payload_twice(): void
+    {
+        $email = $this->makeEmail();
+        $email->getHeaders()->addTextHeader('X-SwMailerPro-Template', 'tpl_1');
+        $email->getHeaders()->addTextHeader('X-SwMailerPro-Campaign', 'camp_1');
+
+        $first = $this->factory->fromEmail($email);
+        $second = $this->factory->fromEmail($email);
+
+        $this->assertSame($first, $second);
+        $this->assertSame('tpl_1', $second['template_id']);
+        $this->assertSame('camp_1', $second['campaign_id']);
+    }
 }

@@ -111,7 +111,13 @@ class PayloadFactory
         }
 
         // --- Custom Header'lar ---
-        $headers = $email->getHeaders();
+        // Kontrol başlıkları aşağıda remove() ile tüketiliyor — ama çağıranın
+        // nesnesi üzerinde değil. Symfony gönderdiği mesajı SentMessage içinde
+        // dinleyicilere devrediyor; orijinali tüketmek, uygulamanın
+        // MessageSent dinleyicisine template/campaign başlıkları silinmiş bir
+        // mesaj gitmesi ve aynı Email'i ikinci kez göndermenin sessizce
+        // template'siz kalması demekti. Kopya üzerinde çalışıyoruz.
+        $headers = clone $email->getHeaders();
 
         // Template desteği
         $templateId = $this->headerValue($headers, 'X-SwMailerPro-Template');

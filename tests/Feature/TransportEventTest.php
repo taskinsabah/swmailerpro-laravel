@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use PHPUnit\Framework\Attributes\Test;
+use Illuminate\Mail\Events\MessageSent;
 use SabahWeb\SwMailerPro\Events\EmailSent;
 use SabahWeb\SwMailerPro\Tests\TestCase;
 
@@ -48,5 +49,29 @@ class TransportEventTest extends TestCase
 
         Event::assertDispatched(EmailSent::class, fn (EmailSent $event) => $event->queued === true);
         Http::assertSent(fn ($request) => str_contains($request->url(), '/email/send-async'));
+    }
+    #[Test]
+    public function a_sent_message_still_carries_its_control_headers(): void
+    {
+        Http::fake(['*' => Http::response(['success' => true, 'data' => []], 200)]);
+
+        $seen = [];
+        Event::listen(MessageSent::class, function (MessageSent $event) use (&$seen) {
+            $headers = $event->sent->getOriginalMessage()->getHeaders();
+            $seen['campaign'] = $headers->get('X-SwMailerPro-Campaign')?->getBodyAsString();
+            $seen['template'] = $headers->get('X-SwMailerPro-Template')?->getBodyAsString();
+        });
+
+        Mail::raw('gövde', function ($message) {
+            $message->to('dest@example.com')->subject('Konu');
+            $message->getSymfonyMessage()->getHeaders()->addTextHeader('X-SwMailerPro-Campaign', 'camp_1');
+            $message->getSymfonyMessage()->getHeaders()->addTextHeader('X-SwMailerPro-Template', 'tpl_1');
+        });
+
+        // Symfony gönderdiği mesajı SentMessage içinde dinleyicilere devrediyor;
+        // payload üretirken onu tüketmek, uygulamanın kendi log satırını
+        // kampanyasız bırakıyordu.
+        $this->assertSame('camp_1', $seen['campaign'] ?? null);
+        $this->assertSame('tpl_1', $seen['template'] ?? null);
     }
 }
