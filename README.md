@@ -304,11 +304,17 @@ normal bir Mailable kullanın.
 
 ```bash
 # Basit test
-php artisan swmailerpro:test --to=test@example.com
+php artisan swmailerpro:test --to=real@address.com
 
 # Tüm seçenekler
-php artisan swmailerpro:test --to=test@example.com --from=noreply@example.com --subject="Test Mail"
+php artisan swmailerpro:test --to=real@address.com --from=noreply@yourdomain.com --subject="Test Mail"
 ```
+
+> `real@address.com` ve `yourdomain.com` yer tutucudur, kendi adreslerinizle değiştirin.
+> Bu sayfadaki diğer örneklerde geçen `example.com` bilerek seçilmiştir: RFC 2606 gereği
+> rezervedir ve mail kabul etmez, dolayısıyla yanlışlıkla bir yabancıya mail gitmez.
+> Gateway de aynı sebeple rezerve alan adlarına gönderimi reddeder — örnekleri olduğu
+> gibi kopyalayıp canlıya göndermeyin.
 
 ---
 
@@ -392,11 +398,11 @@ public function test_welcome_mail_sends_correctly(): void
         ], 200),
     ]);
 
-    Mail::to('user@test.com')->send(new WelcomeMail($user));
+    Mail::to('user@example.com')->send(new WelcomeMail($user));
 
     Http::assertSent(function ($request) {
         return $request['from']['email'] === 'noreply@example.com'
-            && $request['personalizations'][0]['to'][0]['email'] === 'user@test.com';
+            && $request['personalizations'][0]['to'][0]['email'] === 'user@example.com';
     });
 
     Event::assertDispatched(EmailSent::class);

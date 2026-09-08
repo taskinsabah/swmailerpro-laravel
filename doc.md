@@ -141,14 +141,19 @@ Gateway sağlıklı.
 ## 6. Test E-postası Gönder
 
 ```bash
-php artisan swmailerpro:test --to=test@example.com
+php artisan swmailerpro:test --to=real@address.com
 ```
+
+`real@address.com` yer tutucudur — kendi adresinizi yazın. Dokümandaki diğer
+örneklerde geçen `example.com` bilerek seçilmiştir: RFC 2606 gereği rezervedir
+ve mail kabul etmez, gateway de rezerve alan adlarına gönderimi reddeder.
+Örnekleri olduğu gibi kopyalayıp canlıya göndermeyin.
 
 Opsiyon olarak `--from` ve `--subject` de verilebilir:
 
 ```bash
 php artisan swmailerpro:test \
-    --to=test@example.com \
+    --to=real@address.com \
     --from=noreply@yourdomain.com \
     --subject="Deploy Doğrulama"
 ```
@@ -316,5 +321,5 @@ Güncelleme sonrası:
 ```bash
 php artisan config:clear
 php artisan swmailerpro:health
-php artisan swmailerpro:test --to=test@example.com
+php artisan swmailerpro:test --to=real@address.com
 ```

@@ -22,7 +22,7 @@ class FailureReportingTest extends TestCase
     private function send(): void
     {
         Mail::raw('gövde', function ($message) {
-            $message->to('dest@ornek.com.tr')->subject('Konu');
+            $message->to('dest@example.com')->subject('Konu');
         });
     }
 
@@ -51,7 +51,7 @@ class FailureReportingTest extends TestCase
         $this->expectException(ApiException::class);
         $this->expectExceptionMessage('JSON yanıt döndürmedi');
 
-        app('swmailerpro.client')->send(['from' => ['email' => 'a@ornek.com.tr']]);
+        app('swmailerpro.client')->send(['from' => ['email' => 'a@example.com']]);
     }
 
     #[Test]
@@ -66,7 +66,7 @@ class FailureReportingTest extends TestCase
         ]);
 
         try {
-            app('swmailerpro.client')->send(['from' => ['email' => 'a@ornek.com.tr']]);
+            app('swmailerpro.client')->send(['from' => ['email' => 'a@example.com']]);
             $this->fail('bir istisna bekleniyordu');
         } catch (ApiException $e) {
             $this->assertSame('req_abc123', $e->requestId);
@@ -83,7 +83,7 @@ class FailureReportingTest extends TestCase
         try {
             // Malformed template data: PayloadFactory throws before any HTTP call.
             Mail::raw('gövde', function ($message) {
-                $message->to('dest@ornek.com.tr')->subject('Konu');
+                $message->to('dest@example.com')->subject('Konu');
                 $message->getSymfonyMessage()->getHeaders()->addTextHeader('X-SwMailerPro-Template', 'welcome');
                 $message->getSymfonyMessage()->getHeaders()->addTextHeader('X-SwMailerPro-Data', '{bozuk json');
             });
@@ -106,7 +106,7 @@ class FailureReportingTest extends TestCase
                 'data' => [
                     'status' => 200,
                     'provider_message_id' => 'msg_9',
-                    'suppressed_recipients' => ['bounced@ornek.com.tr'],
+                    'suppressed_recipients' => ['bounced@example.com'],
                 ],
                 'request_id' => 'req_9',
             ], 200),
@@ -115,7 +115,7 @@ class FailureReportingTest extends TestCase
         $this->send();
 
         Event::assertDispatched(EmailSent::class, function (EmailSent $event) {
-            return $event->suppressedRecipients === ['bounced@ornek.com.tr'];
+            return $event->suppressedRecipients === ['bounced@example.com'];
         });
     }
 

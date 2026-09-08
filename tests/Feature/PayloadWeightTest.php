@@ -20,7 +20,7 @@ class PayloadWeightTest extends TestCase
     private function sendWithAttachment(int $bytes): void
     {
         Mail::raw('gövde', function ($message) use ($bytes) {
-            $message->to('dest@ornek.com.tr')->subject('Konu');
+            $message->to('dest@example.com')->subject('Konu');
             $message->attachData(str_repeat('A', $bytes), 'rapor.pdf', ['mime' => 'application/pdf']);
         });
     }
@@ -87,8 +87,8 @@ class PayloadWeightTest extends TestCase
 
         try {
             app('swmailerpro.client')->send([
-                'from' => ['email' => 'sender@ornek.com.tr'],
-                'personalizations' => [['to' => [['email' => 'dest@ornek.com.tr']]]],
+                'from' => ['email' => 'sender@example.com'],
+                'personalizations' => [['to' => [['email' => 'dest@example.com']]]],
                 'subject' => 'Konu',
                 'content' => [['type' => 'text/plain', 'value' => 'gövde']],
                 'attachments' => [[
@@ -111,8 +111,8 @@ class PayloadWeightTest extends TestCase
         $this->expectException(PayloadTooLargeException::class);
 
         app('swmailerpro.client')->send([
-            'from' => ['email' => 'sender@ornek.com.tr'],
-            'personalizations' => [['to' => [['email' => 'dest@ornek.com.tr']]]],
+            'from' => ['email' => 'sender@example.com'],
+            'personalizations' => [['to' => [['email' => 'dest@example.com']]]],
             'attachments' => array_fill(0, 3, ['content' => base64_encode('x'), 'filename' => 'a.txt']),
         ]);
     }
