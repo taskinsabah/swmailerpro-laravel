@@ -11,6 +11,7 @@ use SabahWeb\SwMailerPro\Exceptions\ApiException;
 use SabahWeb\SwMailerPro\Exceptions\ConnectionFailedException;
 use SabahWeb\SwMailerPro\Exceptions\PayloadTooLargeException;
 use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
+use SabahWeb\SwMailerPro\Support\MeasuresBase64;
 
 /**
  * SwMailerPro Gateway HTTP client.
@@ -20,6 +21,8 @@ use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
  */
 class SwMailerProClient
 {
+    use MeasuresBase64;
+
     /**
      * Default ceiling on how long any Retry-After may ask us to wait.
      *
@@ -367,24 +370,6 @@ class SwMailerProClient
             $this->human($value),
             $this->human($ceiling),
         ));
-    }
-
-    /**
-     * base64 metninin çözülmüş bayt karşılığı — decode etmeden, bellek harcamadan.
-     *
-     * Boşluk temizliği MIME'a göre satırlara bölünmüş base64 için: RFC 2045 76
-     * karakterde bir CRLF koyar ve o baytlar eke ait değildir.
-     *
-     * Gateway kendi ölçümünde boşluğu ayıklamıyor (utils/helpers.ts base64ByteSize),
-     * yani satırlara bölünmüş bir ek burada geçip orada tavana takılabilir. Doğru
-     * ölçüm bu; fark kapanacaksa gateway tarafında kapanmalı.
-     */
-    protected function decodedSize(string $base64): int
-    {
-        $clean = preg_replace('/\s+/', '', $base64) ?? $base64;
-        $padding = substr_count(substr($clean, -2), '=');
-
-        return max(0, intdiv(strlen($clean) * 3, 4) - $padding);
     }
 
     protected function human(int $value): string

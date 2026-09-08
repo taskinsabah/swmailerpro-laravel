@@ -11,6 +11,7 @@ use SabahWeb\SwMailerPro\Events\EmailFailed;
 use SabahWeb\SwMailerPro\Events\EmailSent;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
+use SabahWeb\SwMailerPro\Support\MeasuresBase64;
 use Symfony\Component\Mailer\SentMessage;
 use Symfony\Component\Mailer\Transport\AbstractTransport;
 use Symfony\Component\Mime\Message;
@@ -25,6 +26,8 @@ use Symfony\Component\Mime\MessageConverter;
  */
 class SwMailerProTransport extends AbstractTransport
 {
+    use MeasuresBase64;
+
     public function __construct(
         protected readonly SwMailerProClient $client,
         protected readonly PayloadFactory $payloadFactory,
@@ -154,10 +157,7 @@ class SwMailerProTransport extends AbstractTransport
 
             $encoded = $attachment['content'];
             $payload['attachments'][$i]['content'] = null;
-            $payload['attachments'][$i]['size_bytes'] = max(
-                0,
-                intdiv(strlen($encoded) * 3, 4) - substr_count(substr($encoded, -2), '='),
-            );
+            $payload['attachments'][$i]['size_bytes'] = $this->decodedSize($encoded);
         }
 
         return $payload;
