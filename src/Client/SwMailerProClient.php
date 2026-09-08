@@ -21,11 +21,13 @@ use SabahWeb\SwMailerPro\Exceptions\UnsupportedFeatureException;
 class SwMailerProClient
 {
     /**
-     * How long a 429's Retry-After may ask us to wait before we stop waiting.
+     * Default ceiling on how long any Retry-After may ask us to wait.
      *
      * Beyond this the honest answer is to fail: sleeping a minute inside a web
      * request or a queue worker holds a process hostage for one message, and
      * the queue can retry the job far more cheaply than we can block.
+     *
+     * Config ile ezilebilir; bir alt sınıf da bu sabiti ezebilir.
      */
     protected const MAX_RETRY_AFTER_SECONDS = 5;
 
@@ -53,7 +55,26 @@ class SwMailerProClient
          *      hiç yapmamak demek. Bir tavanı 0 yapmak o kontrolü kapatır.
          */
         protected readonly array $limits = [],
+        /**
+         * @var int|null Bir Retry-After'ın bizden isteyebileceği en uzun
+         *      bekleme (saniye). null ise sınıfın MAX_RETRY_AFTER_SECONDS
+         *      sabiti geçerli. 0 "hiçbir Retry-After beklenmez" demektir —
+         *      limits'teki 0'ın aksine tavanı KAPATMAZ.
+         */
+        protected readonly ?int $maxRetryAfter = null,
     ) {
+    }
+
+    /**
+     * Yürürlükteki tavan. Config bir değer vermediyse sınıfın kendi sabiti.
+     *
+     * static:: bilerek: sabit protected, yani bir alt sınıf onu ezerek kendi
+     * sabrını tanımlayabilir. Aynı ifade parametre varsayılanı olarak
+     * yazılamaz — PHP derleme zamanı sabitlerinde static:: kabul etmiyor.
+     */
+    protected function maxRetryAfterSeconds(): int
+    {
+        return max(0, $this->maxRetryAfter ?? static::MAX_RETRY_AFTER_SECONDS);
     }
 
     /**
@@ -132,8 +153,9 @@ class SwMailerProClient
     /**
      * HTTP isteği gönderir.
      *
-     * Retry stratejisi: bağlantı hataları, 5xx ve — Retry-After kısa olduğu
-     * sürece — 429. 4xx kalıcı hatalardır, tekrar denenmez.
+     * Retry stratejisi: bağlantı hataları, 5xx ve 429 — ama bir Retry-After
+     * tavandan uzun bir bekleme isterse, statü ne olursa olsun beklenmez.
+     * 4xx kalıcı hatalardır, tekrar denenmez.
      *
      * @param array<string, mixed>|null $data
      * @return array<string, mixed>
@@ -177,8 +199,11 @@ class SwMailerProClient
 
                     // The gateway says how long it wants; guessing 200ms just
                     // burns an attempt against a limit that has not reset.
+                    // min() burada emniyet kemeri: aşağıdaki when kapanışı
+                    // tavanı aşan bir Retry-After'ı zaten reddediyor, ama iki
+                    // kapanış birbirinden bağımsız yazıldı.
                     return $retryAfter > 0
-                        ? $retryAfter * 1000
+                        ? min($retryAfter, $this->maxRetryAfterSeconds()) * 1000
                         : $base * $attempt;
                 },
                 function (\Throwable $e): bool {
@@ -196,10 +221,18 @@ class SwMailerProClient
                     if ($e->response->status() === 429) {
                         $retryAfter = $this->retryAfterSeconds($e);
 
-                        return $retryAfter > 0 && $retryAfter <= self::MAX_RETRY_AFTER_SECONDS;
+                        return $retryAfter > 0 && $retryAfter <= $this->maxRetryAfterSeconds();
                     }
 
-                    return $e->response->serverError();
+                    if (! $e->response->serverError()) {
+                        return false;
+                    }
+
+                    // Bir 5xx'in Retry-After'ı da bağlayıcıdır: tavanı aşan bir
+                    // bekleme isteği 429'daki gibi reddedilir. Başlık yoksa
+                    // retryAfterSeconds() 0 döner ve normal backoff işler —
+                    // 429'un aksine, başlıksız bir 5xx yine denenir.
+                    return $this->retryAfterSeconds($e) <= $this->maxRetryAfterSeconds();
                 },
                 throw: false,
             );

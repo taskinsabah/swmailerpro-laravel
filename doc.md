@@ -62,13 +62,27 @@ return [
     'key' => env('SWMAILERPRO_KEY', ''),
 
     'transport' => [
-        'timeout' => env('SWMAILERPRO_TRANSPORT_TIMEOUT', 30),
-        'retry'   => ['times' => 2, 'sleep' => 200],
+        'timeout'         => env('SWMAILERPRO_TRANSPORT_TIMEOUT', 30),
+        'connect_timeout' => env('SWMAILERPRO_TRANSPORT_CONNECT_TIMEOUT', 10),
+        'retry'           => ['times' => 2, 'sleep' => 200],
+        'max_retry_after' => 5,
     ],
 
     'client' => [
-        'timeout' => env('SWMAILERPRO_CLIENT_TIMEOUT', 30),
-        'retry'   => ['times' => 2, 'sleep' => 200],
+        'timeout'         => env('SWMAILERPRO_CLIENT_TIMEOUT', 30),
+        'connect_timeout' => env('SWMAILERPRO_CLIENT_CONNECT_TIMEOUT', 10),
+        'retry'           => ['times' => 2, 'sleep' => 200],
+        'max_retry_after' => 5,
+    ],
+
+    'idempotency' => env('SWMAILERPRO_IDEMPOTENCY', true),
+
+    'limits' => [
+        'attachments'             => 10,
+        'attachment_bytes'        => 10 * 1024 * 1024,
+        'attachments_total_bytes' => 15 * 1024 * 1024,
+        'personalizations'        => 1000,
+        'body_bytes'              => 20 * 1024 * 1024,
     ],
 
     'defaults' => [
@@ -274,6 +288,10 @@ SWMAILERPRO_CLIENT_TIMEOUT=30
 ```
 
 Retry yapısı sadece geçici hatalarda devreye girer (429 rate limit, 5xx server error, bağlantı kopması). Kalıcı hatalar (400, 401, 403) anında başarısız olur.
+
+Yanıt bir `Retry-After` taşıyorsa — 429 da olsa 5xx de olsa — istenen bekleme
+`max_retry_after` tavanını aşarsa hiç beklenmez; istek anında hatayla döner ve işi
+kuyruk tekrarlar. Varsayılan tavan 5 saniyedir.
 
 ---
 

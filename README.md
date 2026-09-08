@@ -55,12 +55,16 @@ return [
         'timeout' => env('SWMAILERPRO_TRANSPORT_TIMEOUT', 30),
         'connect_timeout' => env('SWMAILERPRO_TRANSPORT_CONNECT_TIMEOUT', 10),
         'retry' => ['times' => 2, 'sleep' => 200],
+        'max_retry_after' => 5,
     ],
 
     'client' => [
         'timeout' => env('SWMAILERPRO_CLIENT_TIMEOUT', 30),
         'connect_timeout' => env('SWMAILERPRO_CLIENT_CONNECT_TIMEOUT', 10),
         'retry' => ['times' => 2, 'sleep' => 200],
+        // Gateway daha uzun bir bekleme isterse istek beklenmeden hatayla
+        // döner. 0 = hiçbir Retry-After beklenmez (tavanı kapatmaz).
+        'max_retry_after' => 5,
     ],
 
     // Tekrar denemeyi güvenli kılan şey: gateway aynı anahtarla gelen ikinci
@@ -475,12 +479,19 @@ try {
 ### Retry Stratejisi
 
 Client sadece geçici hatalarda tekrar dener:
-- **5xx** Server Error → retry
+- **5xx** Server Error → retry — ama yanıt bir `Retry-After` taşıyorsa o da bağlayıcıdır
+  (aşağıdaki tavan kuralı).
 - **ConnectionException** → retry
-- **429** Too Many Requests → yanıttaki `Retry-After` **5 saniyeye kadarsa** beklenir ve
-  tekrar denenir. Daha uzunsa istek hatayla döner: bir worker'ı bir mesaj için bir dakika
-  bloke etmek, hatayı kuyruğa geri vermekten pahalıdır.
+- **429** Too Many Requests → yanıttaki `Retry-After` beklenir ve tekrar denenir
 - **4xx** (400, 401, 403) → **retry yapılmaz** (kalıcı hatalar)
+
+**Retry-After tavanı.** 429 ve 5xx fark etmez: gateway tavandan daha uzun bir bekleme
+isterse istek beklenmeden hatayla döner. Bir worker'ı tek bir mesaj için dakikalarca
+bloke etmek, hatayı kuyruğa geri vermekten pahalıdır — kuyruk aynı işi çok daha ucuza
+tekrarlar. Tavan varsayılan **5 saniye**, `client.max_retry_after` ve
+`transport.max_retry_after` ile ayarlanır. Buradaki `0` "tavan yok" değil, "hiçbir
+`Retry-After` beklenmez" demektir. Başlık taşımayan bir 5xx bu kuralın dışındadır;
+normal backoff ile denenir.
 
 Her gönderim isteği bir `Idempotency-Key` taşır (mesajın Message-ID'si). Aynı mesajın her
 denemesi aynı anahtarı kullanır, dolayısıyla gateway'in kabul ettiği bir mail zaman aşımı

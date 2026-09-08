@@ -115,4 +115,124 @@ class RetryPolicyTest extends TestCase
             );
         }
     }
+    #[Test]
+    public function a_short_server_error_retry_after_is_waited_out(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['success' => false, 'error' => ['code' => 'INTERNAL']], 503, ['Retry-After' => '3'])
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts());
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 3000);
+    }
+
+    #[Test]
+    public function a_long_server_error_retry_after_is_handed_back_instead_of_blocking(): void
+    {
+        Http::fake([
+            '*' => Http::response(
+                ['success' => false, 'error' => ['code' => 'INTERNAL', 'message' => 'overloaded']],
+                503,
+                ['Retry-After' => '600'],
+            ),
+        ]);
+
+        $this->expectException(ApiException::class);
+
+        try {
+            $this->client()->send($this->payload());
+        } finally {
+            $this->assertSame(
+                1,
+                $this->attempts(),
+                'a 5xx that asks for ten minutes is no more worth waiting out than a 429 is',
+            );
+            Sleep::assertNeverSlept();
+        }
+    }
+
+    #[Test]
+    public function a_server_error_without_a_retry_after_still_uses_the_base_backoff(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['success' => false, 'error' => ['code' => 'INTERNAL']], 500)
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'no header means no instruction, not a refusal to retry');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
+    }
+
+    #[Test]
+    public function the_ceiling_is_read_from_config(): void
+    {
+        config()->set('swmailerpro.client.max_retry_after', 30);
+
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['success' => false, 'error' => ['code' => 'RATE_LIMIT']], 429, ['Retry-After' => '20'])
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'sabrı uygulama belirler, sınıf sabiti değil');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 20000);
+    }
+
+    #[Test]
+    public function a_zero_ceiling_waits_for_no_one(): void
+    {
+        config()->set('swmailerpro.client.max_retry_after', 0);
+
+        Http::fake([
+            '*' => Http::response(
+                ['success' => false, 'error' => ['code' => 'RATE_LIMIT']],
+                429,
+                ['Retry-After' => '1'],
+            ),
+        ]);
+
+        $this->expectException(ApiException::class);
+
+        try {
+            $this->client()->send($this->payload());
+        } finally {
+            $this->assertSame(
+                1,
+                $this->attempts(),
+                '0 burada "tavan yok" değil, "hiç beklenmez" demektir',
+            );
+            Sleep::assertNeverSlept();
+        }
+    }
+
+    #[Test]
+    public function a_tolerated_503_is_answered_not_slept_through(): void
+    {
+        Http::fake([
+            '*' => Http::response(
+                ['success' => true, 'data' => ['status' => 'degraded']],
+                503,
+                ['Retry-After' => '600'],
+            ),
+        ]);
+
+        $health = $this->client()->health();
+
+        $this->assertSame('degraded', $health['data']['status']);
+        $this->assertSame(
+            1,
+            $this->attempts(),
+            'health komutu bozuk bir gateway raporlar; on dakika onu beklemez',
+        );
+        Sleep::assertNeverSlept();
+    }
 }

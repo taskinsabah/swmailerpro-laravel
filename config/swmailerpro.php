@@ -24,6 +24,12 @@ return [
     | Laravel mail transport (Mail::to()->send()) için timeout ve retry
     | konfigürasyonu. Bu değerler sadece Mailable gönderimlerinde kullanılır.
     |
+    | max_retry_after: gateway "Retry-After" ile ne kadar beklememizi isterse
+    | istesin, bu tavandan uzun bir bekleme kabul edilmez — istek beklenmeden
+    | hatayla döner ve işi kuyruk çok daha ucuza tekrarlar. Dikkat: buradaki 0,
+    | aşağıdaki "limits"teki 0'ın aksine kontrolü KAPATMAZ; "hiçbir Retry-After
+    | beklenmez" demektir.
+    |
     */
 
     'transport' => [
@@ -35,6 +41,7 @@ return [
             'times' => 2,
             'sleep' => 200,
         ],
+        'max_retry_after' => 5,
     ],
 
     /*
@@ -45,6 +52,12 @@ return [
     | Facade / direct API kullanımı (SwMailerPro::send()) için timeout ve
     | retry konfigürasyonu. Artisan komutları da bu ayarları kullanır.
     |
+    | max_retry_after: gateway "Retry-After" ile ne kadar beklememizi isterse
+    | istesin, bu tavandan uzun bir bekleme kabul edilmez — istek beklenmeden
+    | hatayla döner ve işi kuyruk çok daha ucuza tekrarlar. Dikkat: buradaki 0,
+    | aşağıdaki "limits"teki 0'ın aksine kontrolü KAPATMAZ; "hiçbir Retry-After
+    | beklenmez" demektir.
+    |
     */
 
     'client' => [
@@ -54,6 +67,7 @@ return [
             'times' => 2,
             'sleep' => 200,
         ],
+        'max_retry_after' => 5,
     ],
 
     /*
