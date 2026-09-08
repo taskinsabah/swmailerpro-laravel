@@ -216,4 +216,67 @@ class FailureReportingTest extends TestCase
 
         Http::assertSentCount(1);
     }
+    #[Test]
+    public function an_error_code_that_is_not_a_string_is_still_our_exception(): void
+    {
+        // Şema garanti değil: gateway error.code'u bir sağlayıcının ham
+        // gövdesinden kopyalayabiliyor. Diziyi mesaja gömmek "Array to string
+        // conversion" fırlatıyordu ve doğan ErrorException ne
+        // SwMailerProException ne de TransportExceptionInterface olduğu için
+        // dokümanın "SwMailerProException yakalayın" sözleşmesi kırılıyordu.
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'error' => ['code' => ['A', 'B'], 'message' => ['x' => 1]],
+        ], 400)]);
+
+        try {
+            app('swmailerpro.client')->send(['from' => ['email' => 'a@example.com']]);
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('UNKNOWN', $e->errorCode);
+            $this->assertSame(400, $e->httpStatus);
+            // Kod da mesaj da kullanılamazsa 400'ün sebebi hiçbir yerde
+            // kalmıyor; ham gövde en azından onu taşıyor.
+            $this->assertStringContainsString('"code":["A","B"]', $e->getMessage());
+            $this->assertSame(['A', 'B'], $e->errorBody['error']['code']);
+        }
+    }
+
+    #[Test]
+    public function a_non_scalar_message_falls_back_to_the_body_but_keeps_the_code(): void
+    {
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'error' => ['code' => 'VALIDATION_ERROR', 'message' => ['subject' => 'required']],
+            'request_id' => 'req_nonscalar',
+        ], 422)]);
+
+        try {
+            app('swmailerpro.client')->send(['from' => ['email' => 'a@example.com']]);
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('VALIDATION_ERROR', $e->errorCode);
+            $this->assertSame('req_nonscalar', $e->requestId);
+            $this->assertStringContainsString('"subject":"required"', $e->getMessage());
+        }
+    }
+
+    #[Test]
+    public function an_error_field_that_is_not_an_object_reports_the_body(): void
+    {
+        // "error" bir metin: bugün de doğru davranıyor, ama kod yolu artık
+        // is_array'den geçtiği için kilitlenmesi gerekiyor.
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'error' => 'plain string error',
+        ], 400)]);
+
+        try {
+            $this->send();
+            $this->fail('bir istisna bekleniyordu');
+        } catch (ApiException $e) {
+            $this->assertSame('UNKNOWN', $e->errorCode);
+            $this->assertStringContainsString('plain string error', $e->getMessage());
+        }
+    }
 }

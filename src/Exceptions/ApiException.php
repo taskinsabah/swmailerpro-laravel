@@ -44,8 +44,18 @@ class ApiException extends SwMailerProException implements TransportExceptionInt
     public static function fromResponse(Response $response): self
     {
         $body = $response->json();
-        $errorMsg = $body['error']['message'] ?? $response->body();
-        $errorCode = $body['error']['code'] ?? 'UNKNOWN';
+        $error = is_array($body) && is_array($body['error'] ?? null) ? $body['error'] : [];
+
+        // Şema garanti değil: araya giren bir proxy HTML döndürüyor, bir
+        // sağlayıcının ham gövdesi error.code'a dizi koyabiliyor. Skaler
+        // olmayan bir değeri metne gömmek "Array to string conversion"
+        // fırlatıyordu; doğan ErrorException bu paketin hiyerarşisinin dışında
+        // kaldığı için hem "SwMailerProException yakalayın" sözleşmesini hem de
+        // TransportExceptionInterface'e bağlı failover'ı kırıyordu.
+        // Kullanılamayan bir kod UNKNOWN, kullanılamayan bir mesaj ham gövde —
+        // ikisi de alan hiç yokken zaten uygulanan davranış.
+        $errorCode = is_scalar($error['code'] ?? null) ? (string) $error['code'] : 'UNKNOWN';
+        $errorMsg = is_scalar($error['message'] ?? null) ? (string) $error['message'] : $response->body();
 
         $requestId = is_array($body) && is_string($body['request_id'] ?? null) ? $body['request_id'] : null;
 

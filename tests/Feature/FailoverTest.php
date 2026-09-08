@@ -124,4 +124,19 @@ class FailoverTest extends TestCase
 
         $this->failover()->send($mail);
     }
+    #[Test]
+    public function a_gateway_error_we_cannot_parse_still_falls_over(): void
+    {
+        // Failover yalnızca TransportExceptionInterface yakalıyor. Dizi taşıyan
+        // bir error.code, ApiException'ı hiç doğmadan ErrorException'a
+        // çeviriyordu: yedek taşıyıcı denenmiyor, mail düşüyordu.
+        Http::fake(['*' => Http::response([
+            'success' => false,
+            'error' => ['code' => ['A', 'B'], 'message' => ['x' => 1]],
+        ], 500)]);
+
+        $this->failover()->send($this->mail());
+
+        $this->assertTrue(true);
+    }
 }
