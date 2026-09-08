@@ -326,10 +326,17 @@ class SwMailerProClient
 
     /**
      * base64 metninin çözülmüş bayt karşılığı — decode etmeden, bellek harcamadan.
+     *
+     * Boşluk temizliği MIME'a göre satırlara bölünmüş base64 için: RFC 2045 76
+     * karakterde bir CRLF koyar ve o baytlar eke ait değildir.
+     *
+     * Gateway kendi ölçümünde boşluğu ayıklamıyor (utils/helpers.ts base64ByteSize),
+     * yani satırlara bölünmüş bir ek burada geçip orada tavana takılabilir. Doğru
+     * ölçüm bu; fark kapanacaksa gateway tarafında kapanmalı.
      */
     protected function decodedSize(string $base64): int
     {
-        $clean = preg_replace('/s+/', '', $base64) ?? $base64;
+        $clean = preg_replace('/\s+/', '', $base64) ?? $base64;
         $padding = substr_count(substr($clean, -2), '=');
 
         return max(0, intdiv(strlen($clean) * 3, 4) - $padding);

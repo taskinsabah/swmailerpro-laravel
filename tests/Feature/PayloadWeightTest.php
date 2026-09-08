@@ -128,6 +128,62 @@ class PayloadWeightTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    #[Test]
+    public function an_attachment_whose_base64_is_all_s_characters_is_still_measured(): void
+    {
+        Http::fake(['*' => Http::response(['success' => true, 'data' => []], 200)]);
+        config()->set('swmailerpro.limits.attachment_bytes', 4096);
+
+        // Bu üç bayt base64'te yalnızca "s" harfine çözülür. Boşluk deseni yanlış
+        // yazıldığında temizlik ekin tamamını siliyor, ölçüm 0 çıkıyor ve tavan ne
+        // olursa olsun geçiyordu — canlıda 12 MB'lık bir ek 10 MB'ı böyle aştı.
+        $bytes = str_repeat(chr(0xb2) . chr(0xcb) . chr(0x2c), 4096);
+        $this->assertSame(12288, strlen($bytes));
+
+        try {
+            app('swmailerpro.client')->send([
+                'from' => ['email' => 'sender@example.com'],
+                'personalizations' => [['to' => [['email' => 'dest@example.com']]]],
+                'subject' => 'Konu',
+                'content' => [['type' => 'text/plain', 'value' => 'gövde']],
+                'attachments' => [[
+                    'content' => base64_encode($bytes),
+                    'filename' => 'hepsi-s.bin',
+                ]],
+            ]);
+            $this->fail('bir istisna bekleniyordu');
+        } catch (PayloadTooLargeException $e) {
+            $this->assertStringContainsString('hepsi-s.bin', $e->getMessage());
+        }
+
+        Http::assertNothingSent();
+    }
+
+    #[Test]
+    public function a_line_wrapped_attachment_is_not_measured_as_bigger_than_it_is(): void
+    {
+        Http::fake(['*' => Http::response(['success' => true, 'data' => []], 200)]);
+        config()->set('swmailerpro.limits.attachment_bytes', 100000);
+
+        // MIME base64'ü 76 karakterde bir böler; o satır sonları ekin baytı değil.
+        // Sayıldıklarında ölçüm %2.6 şişiyor ve tavanın altındaki bir ek boşuna
+        // reddediliyordu.
+        $chunked = chunk_split(base64_encode(str_repeat('A', 99000)), 76);
+
+        app('swmailerpro.client')->send([
+            'from' => ['email' => 'sender@example.com'],
+            'personalizations' => [['to' => [['email' => 'dest@example.com']]]],
+            'subject' => 'Konu',
+            'content' => [['type' => 'text/plain', 'value' => 'gövde']],
+            'attachments' => [[
+                'content' => $chunked,
+                'filename' => 'satirli.pdf',
+            ]],
+        ]);
+
+        Http::assertSentCount(1);
+    }
+
     private function rootCause(\Throwable $e): \Throwable
     {
         while ($e->getPrevious() !== null) {
