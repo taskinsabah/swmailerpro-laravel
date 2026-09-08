@@ -424,4 +424,26 @@ class RetryPolicyTest extends TestCase
         $this->assertSame(2, $this->attempts(), 'saat 25 de yok, dakika 61 de');
         Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
     }
+    #[Test]
+    public function a_redirect_surfaces_as_a_package_exception(): void
+    {
+        // 3xx ne successful ne failed: Laravel'in when kapanışına istisna yerine
+        // null geçer. Kapanış null kabul etmezse paketin sözleşmesi ("bir
+        // SwMailerProException yakalayın") ham bir TypeError ile kırılır.
+        Http::fake([
+            '*' => Http::response(
+                ['success' => false, 'error' => ['code' => 'MOVED', 'message' => 'taşındı']],
+                301,
+            ),
+        ]);
+
+        try {
+            $this->client()->send($this->payload());
+            $this->fail('a 301 should surface as an ApiException');
+        } catch (ApiException $e) {
+            $this->assertSame(301, $e->httpStatus);
+        }
+
+        $this->assertSame(1, $this->attempts(), 'bir yönlendirme geçici bir hata değildir');
+    }
 }

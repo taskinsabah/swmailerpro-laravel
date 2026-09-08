@@ -206,7 +206,16 @@ class SwMailerProClient
                         ? min($retryAfter, $this->maxRetryAfterSeconds()) * 1000
                         : $base * $attempt;
                 },
-                function (\Throwable $e): bool {
+                function (?\Throwable $e): bool {
+                    // Laravel bu kapanışa $response->toException() geçiyor ve o
+                    // yalnızca 4xx/5xx için bir istisna üretir. 3xx ne başarılı
+                    // ne hatalı sayıldığından null geliyor; imza null kabul
+                    // etmezse paketin "SwMailerProException yakalayın"
+                    // sözleşmesi ham bir TypeError ile kırılıyor.
+                    if ($e === null) {
+                        return false;
+                    }
+
                     if ($e instanceof ConnectionException) {
                         // Safe to repeat only because the Idempotency-Key above
                         // means a request the gateway already accepted is not
