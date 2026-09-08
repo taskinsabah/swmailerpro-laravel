@@ -445,9 +445,22 @@ class SwMailerProClient
         foreach ($formats as $format) {
             $parsed = \DateTimeImmutable::createFromFormat($format, $value, $gmt);
 
-            if ($parsed !== false) {
-                return $parsed->getTimestamp();
+            if ($parsed === false) {
+                continue;
             }
+
+            // Biçime uyan her metin geçerli bir tarih değil: "32 Sep" ya da
+            // "25:61" ayrıştırıcıyı yanıltmaz ama false da döndürmez — alanı
+            // taşırıp bir uyarı bırakır. Uyarıyı okumazsak bozuk bir başlık,
+            // tavanı aşan geçerli bir tarih gibi görünür ve tekrar denenebilir
+            // bir 5xx'i hiç denenmeden hataya çevirir.
+            $errors = \DateTimeImmutable::getLastErrors();
+
+            if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
+                continue;
+            }
+
+            return $parsed->getTimestamp();
         }
 
         return null;

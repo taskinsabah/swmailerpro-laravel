@@ -384,4 +384,44 @@ class RetryPolicyTest extends TestCase
         $this->assertSame(2, $this->attempts(), 'geçmiş bir tarih "bekleme" demektir, "vazgeç" değil');
         Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
     }
+    #[Test]
+    public function a_retry_after_date_with_an_impossible_field_is_not_a_date_at_all(): void
+    {
+        // "32 Eylül" bir tarih değil, ama createFromFormat onu 2 Ekim'e taşırıp
+        // false yerine bir nesne döndürür. Okunmazsa bozuk başlık, tavanı aşan
+        // geçerli bir tarih gibi görünür ve denenebilir bir 5xx'i öldürür.
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'INTERNAL']],
+                    503,
+                    ['Retry-After' => 'Tue, 32 ' . gmdate('M Y H:i:s', time() + 2) . ' GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'taşan bir alan, uzun bir bekleme emri değildir');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
+    }
+
+    #[Test]
+    public function a_retry_after_time_that_rolls_over_is_not_a_date_either(): void
+    {
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(
+                    ['success' => false, 'error' => ['code' => 'INTERNAL']],
+                    503,
+                    ['Retry-After' => gmdate('D, d M Y', time()) . ' 25:61:00 GMT'],
+                )
+                ->push(['success' => true, 'data' => []], 200),
+        ]);
+
+        $this->client()->send($this->payload());
+
+        $this->assertSame(2, $this->attempts(), 'saat 25 de yok, dakika 61 de');
+        Sleep::assertSlept(fn ($duration) => (int) $duration->totalMilliseconds === 200);
+    }
 }
