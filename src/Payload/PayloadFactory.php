@@ -297,7 +297,15 @@ class PayloadFactory
     }
 
     /**
-     * @return array<string, string>
+     * Gateway'e gidecek başlık haritası.
+     *
+     * Anahtar tipi int|string, çünkü PHP sayısal görünen bir dizi anahtarını
+     * int'e çevirir: "123" adlı bir başlık $custom[123] olur. RFC böyle bir adı
+     * yasaklamıyor, pratikte de kimse göndermiyor, ve payload JSON'a giderken
+     * anahtar yeniden string olduğu için gateway tarafında fark etmiyor —
+     * ama burada string demek yalan olurdu.
+     *
+     * @return array<int|string, string>
      */
     protected function customHeaders(Headers $headers): array
     {
