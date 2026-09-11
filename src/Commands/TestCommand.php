@@ -280,8 +280,18 @@ class TestCommand extends Command
     {
         try {
             return $this->laravel->make(SwMailerProClient::class);
-        } catch (ConfigurationException $e) {
-            $this->reportMissingConfiguration($e);
+        } catch (\Throwable $e) {
+            // Throwable, not ConfigurationException: the container is opaque to
+            // static analysis, which cannot see that the provider's singleton
+            // closure throws and so reads a narrower catch here as dead code.
+            // It is also the truthful shape — a container failure is not always
+            // a configuration one, and either way this command has to answer
+            // with a sentence rather than the stack trace it used to print.
+            if ($e instanceof ConfigurationException) {
+                $this->reportMissingConfiguration($e);
+            } else {
+                $this->error("SwMailerPro istemcisi oluşturulamadı: {$e->getMessage()}");
+            }
 
             return null;
         }
