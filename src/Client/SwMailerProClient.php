@@ -91,6 +91,24 @@ class SwMailerProClient
         'attachments_total_bytes' => 15728640,
         'personalizations' => 1000,
         'body_bytes' => 20971520,
+        // Published config files from v1.0.0 have none of the keys below, and
+        // config() merging does not reach into a nested array — so these
+        // defaults are what such an application actually enforces. They stay
+        // equal to the shipped config values, with one deliberate exception.
+        'header_overhead_bytes' => 2048,
+        // The exception. The queue ceiling only exists on a gateway that has
+        // QUEUE_ASYNC_SENDS turned on, and that flag ships off — so an async
+        // send of 5 MB is something some gateways accept today. A v1.0.0
+        // config carries neither this key nor the env() line that overrides
+        // it, so mirroring the shipped 2 MiB here would impose a new hard
+        // failure on an application that cannot see the knob anywhere in its
+        // own config file. 0 leaves such an application exactly as it was;
+        // the shipped config turns the guard on for everyone who installs now.
+        'async_payload_bytes' => 0,
+        'subject_chars' => 998,
+        'content_value_chars' => 5000000,
+        'address_name_chars' => 256,
+        'filename_chars' => 256,
     ];
 
     /**
@@ -120,6 +138,7 @@ class SwMailerProClient
     {
         $this->guardCapabilities($payload);
         $this->guardSize($payload);
+        $this->guardQueueSize($payload);
 
         return $this->request('POST', '/api/v1/email/send-async', $payload, $idempotencyKey);
     }
@@ -335,21 +354,196 @@ class SwMailerProClient
             $name = is_string($attachment['filename'] ?? null) ? $attachment['filename'] : '(isimsiz)';
 
             $this->assertWithin('attachment_bytes', $size, "ek boyutu ({$name})");
+
+            if (is_string($attachment['filename'] ?? null)) {
+                $this->assertLengthWithin('filename_chars', $attachment['filename'], "ek dosya adı ({$name})");
+            }
         }
 
         $this->assertWithin('attachments_total_bytes', $total, 'toplam ek boyutu');
 
-        // Gövde tahmini: json_encode etmeden, taşıyan iki terimi toplayarak.
-        // Amaç kesin bayt sayısı değil, 20 MB tavanına çarpacağı belli olan
-        // bir isteği ağa hiç çıkarmamak.
-        $body = $total;
-        foreach ((is_array($payload['content'] ?? null) ? $payload['content'] : []) as $part) {
+        $this->guardTextLimits($payload);
+
+        $this->assertWithin('body_bytes', $this->encodedSize($payload), 'mesaj boyutu');
+    }
+
+    /**
+     * Kuyruğa alınamayacak kadar ağır bir mesajı yüklemeden önce reddeder.
+     *
+     * Gateway'de kuyruk açıkken (QUEUE_ASYNC_SENDS) /send-async gövdeyi
+     * tartıyor ve QUEUE_MAX_PAYLOAD_BYTES'ı aşanı 413 PAYLOAD_TOO_LARGE ile
+     * geri çeviriyor — worker bir batch'in tamamını aynı anda belleğe alıyor,
+     * o yüzden tavan gövde tavanından (20 MB) çok daha alçak: varsayılan 2 MiB.
+     * Bizde karşılığı olmadığı için 1.6 MB'lık bir ek base64'e şişip tamamen
+     * yükleniyor ve ancak orada reddediliyordu; üstelik README'nin söz verdiği
+     * PayloadTooLargeException yerine ApiException olarak.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws PayloadTooLargeException
+     */
+    protected function guardQueueSize(array $payload): void
+    {
+        $ceiling = $this->ceiling('async_payload_bytes');
+
+        if ($ceiling <= 0) {
+            return;
+        }
+
+        // No header overhead here, unlike the body check: the queue weighs the
+        // request body and nothing else (a bare Buffer.byteLength of the
+        // stringified payload). Adding the 2048-byte pad that belongs to the
+        // gateway's *other* size check would make us 2 KB stricter than the
+        // ceiling we claim to mirror — the same drift this guard exists to end.
+        $bytes = $this->encodedSize($payload, withOverhead: false);
+
+        if ($bytes <= $ceiling) {
+            return;
+        }
+
+        throw new PayloadTooLargeException(sprintf(
+            'SwMailerPro: kuyruk payload sınırı aşıyor (%s > %s). Gateway bu mesajı kuyruğa almaz; '
+            . 'aynısını senkron /api/v1/email/send ile gönderin. İstek gönderilmedi.',
+            $this->human($bytes),
+            $this->human($ceiling),
+        ));
+    }
+
+    /**
+     * Gövde ağırlığıyla ilgisi olmayan, sıradan bir mailin çarptığı tavanlar.
+     *
+     * Hepsi gateway'in şemasında ve aşıldığında yanıt 400 VALIDATION_ERROR —
+     * ama ancak gövdenin tamamı yüklendikten sonra, üstelik çağırana hangi
+     * alanın suçlu olduğunu söylemeyen bir gövdeyle.
+     *
+     * @param array<string, mixed> $payload
+     *
+     * @throws PayloadTooLargeException
+     */
+    protected function guardTextLimits(array $payload): void
+    {
+        if (is_string($payload['subject'] ?? null)) {
+            $this->assertLengthWithin('subject_chars', $payload['subject'], 'konu uzunluğu');
+        }
+
+        foreach ((is_array($payload['content'] ?? null) ? $payload['content'] : []) as $index => $part) {
             if (is_array($part) && is_string($part['value'] ?? null)) {
-                $body += strlen($part['value']);
+                $label = sprintf('içerik uzunluğu (bölüm %d)', is_int($index) ? $index + 1 : 1);
+                $this->assertLengthWithin('content_value_chars', $part['value'], $label);
             }
         }
 
-        $this->assertWithin('body_bytes', $body, 'mesaj boyutu');
+        foreach (['from', 'reply_to', 'envelope_from'] as $field) {
+            $this->assertAddressNameWithin($payload[$field] ?? null);
+        }
+
+        $personalizations = is_array($payload['personalizations'] ?? null) ? $payload['personalizations'] : [];
+
+        foreach ($personalizations as $personalization) {
+            if (! is_array($personalization)) {
+                continue;
+            }
+
+            // Personalization'ın kendi subject'i de aynı tavana tabi; gövdedeki
+            // subject'e bakıp burayı atlamak, per-recipient konu kullanan bir
+            // gönderimde tavanı tamamen kör bırakıyordu.
+            if (is_string($personalization['subject'] ?? null)) {
+                $this->assertLengthWithin('subject_chars', $personalization['subject'], 'konu uzunluğu');
+            }
+
+            $this->assertAddressNameWithin($personalization['from'] ?? null);
+
+            foreach (['to', 'cc', 'bcc'] as $group) {
+                $addresses = is_array($personalization[$group] ?? null) ? $personalization[$group] : [];
+
+                foreach ($addresses as $address) {
+                    $this->assertAddressNameWithin($address);
+                }
+            }
+        }
+    }
+
+    /**
+     * Bir adresin görünen adı tavanı aşıyorsa reddeder. Adres bir dizi değilse
+     * ya da adı yoksa söylenecek bir şey yok — asıl doğrulama gateway'in.
+     *
+     * @throws PayloadTooLargeException
+     */
+    protected function assertAddressNameWithin(mixed $address): void
+    {
+        if (! is_array($address) || ! is_string($address['name'] ?? null)) {
+            return;
+        }
+
+        $email = is_string($address['email'] ?? null) ? $address['email'] : '(adressiz)';
+
+        $this->assertLengthWithin('address_name_chars', $address['name'], "görünen ad ({$email})");
+    }
+
+    /**
+     * Gövdenin gateway'in tarttığı hâlinin bayt sayısı.
+     *
+     * Gateway gövdeyi aldığı gibi ölçüyor: her ek orada base64 (≈4/3) ve JSON
+     * kaçışlarıyla duruyor. Çözülmüş ek baytlarını toplamak ölçümü ~%33 hafif
+     * gösteriyordu — yani 15 MB'lık ekler yerelde geçiyor, gateway'de 20 MB
+     * tavanına çarpıyordu ve tavan tam işe yarayacağı bantta susuyordu.
+     * header_overhead_bytes, gateway'in kendi hesabına eklediği sabit başlık
+     * payının kopyası; tam sınırdaki bir mesaj burada geçip orada
+     * reddedilmesin diye.
+     *
+     * @param array<string, mixed> $payload
+     */
+    protected function encodedSize(array $payload, bool $withOverhead = true): int
+    {
+        $json = json_encode($payload);
+
+        // Geçersiz UTF-8'de json_encode false döner. Böyle bir payload zaten
+        // gönderilemiyor; hatayı kodlamayı gerçekten yapan katman versin —
+        // buradan "boyut bilinmiyor" diye geçmek, tavanı yanlış bir gerekçeyle
+        // patlatmaktan iyi.
+        if ($json === false) {
+            return 0;
+        }
+
+        if (! $withOverhead) {
+            return strlen($json);
+        }
+
+        return strlen($json) + max(0, $this->ceiling('header_overhead_bytes'));
+    }
+
+    /**
+     * Yürürlükteki tavan: config verdiyse o, vermediyse paketin kendi
+     * varsayılanı. v1.0.0'dan kalma bir published config yeni anahtarları
+     * taşımıyor ve onlar için ikinci kaynak burası.
+     */
+    protected function ceiling(string $limit): int
+    {
+        return (int) ($this->limits[$limit] ?? self::DEFAULT_LIMITS[$limit] ?? 0);
+    }
+
+    /**
+     * Karakter sayısıyla ölçülen bir tavan. Bayt değil karakter, çünkü
+     * gateway'in şeması da öyle sayıyor: "Ayşe" 4 karakter, 5 bayt — bayta
+     * bakmak Türkçe bir konuyu tavanın altındayken reddederdi.
+     *
+     * @throws PayloadTooLargeException
+     */
+    protected function assertLengthWithin(string $limit, string $value, string $label): void
+    {
+        $ceiling = $this->ceiling($limit);
+        $length = mb_strlen($value, 'UTF-8');
+
+        if ($ceiling <= 0 || $length <= $ceiling) {
+            return;
+        }
+
+        throw new PayloadTooLargeException(sprintf(
+            'SwMailerPro: %s sınırı aşıyor (%d > %d karakter). Gateway bunu zaten reddederdi; istek gönderilmedi.',
+            $label,
+            $length,
+            $ceiling,
+        ));
     }
 
     /**
@@ -358,7 +552,7 @@ class SwMailerProClient
      */
     protected function assertWithin(string $limit, int $value, string $label): void
     {
-        $ceiling = $this->limits[$limit] ?? self::DEFAULT_LIMITS[$limit] ?? 0;
+        $ceiling = $this->ceiling($limit);
 
         if ($ceiling <= 0 || $value <= $ceiling) {
             return;
