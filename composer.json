@@ -2,6 +2,7 @@
     "name": "sabahweb/swmailerpro-laravel",
     "description": "Laravel mail transport ve API client paketi — SwMailerPro email gateway entegrasyonu",
     "keywords": ["laravel", "mail", "email", "transport", "swmailerpro", "mailchannels"],
+    "homepage": "https://github.com/taskinsabah/swmailerpro-laravel",
     "license": "MIT",
     "authors": [
         {

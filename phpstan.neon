@@ -2,3 +2,7 @@ parameters:
     level: 8
     paths:
         - src
+        # config/swmailerpro.php ships in the dist archive and is merged into
+        # the container at boot, so a typo there is a production failure the
+        # suite may never reach. Analysing only src left it unchecked.
+        - config

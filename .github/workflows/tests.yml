@@ -34,6 +34,14 @@ jobs:
           extensions: mbstring, intl
           coverage: none
 
+      # Has to run before the pin below: that step rewrites composer.json, so
+      # validating afterwards would check a file no consumer ever sees. A
+      # malformed or incomplete manifest used to reach a tag with CI green.
+      # --no-check-lock because composer.lock is gitignored here; without it a
+      # lock that ever appears turns a manifest check into a lock check.
+      - name: Validate the manifest
+        run: composer validate --strict --no-check-lock
+
       # laravel/framework replaces every illuminate/* split, so requiring it
       # pins the whole line deterministically instead of letting each split
       # resolve on its own.
@@ -53,3 +61,27 @@ jobs:
       # framework while its manifest claims otherwise.
       - name: No Foundation imports
         run: "! grep -rn 'Illuminate\\Foundation' src/ || exit 1"
+
+  # Every matrix leg rewrites composer.json before installing, so none of them
+  # proves the published manifest resolves on its own. This leg installs the
+  # manifest exactly as a consumer gets it — one PHP version, no pin — so
+  # "CI is green" means "composer require works". PHP 8.2 because that is the
+  # floor the manifest advertises, and a wrong floor shows up nowhere else.
+  manifest:
+    runs-on: ubuntu-latest
+    name: Install as a consumer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mbstring, intl
+          coverage: none
+
+      - name: Install from the unmodified manifest
+        run: composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Tests
+        run: vendor/bin/phpunit

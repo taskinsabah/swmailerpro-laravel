@@ -1,0 +1,16 @@
+# Without this file every `composer require` downloads the development tree:
+# the dist zip carried 43 files / 227 KB, of which tests/ alone was 17 files
+# and 112 KB — half the download, for code no consumer ever runs. GitHub's
+# zipball endpoint (what Composer fetches for dist) honours export-ignore,
+# so these lines shrink real installs, not just `git archive` output.
+#
+# doc.md is deliberately NOT ignored: it is consumer-facing integration and
+# deploy guidance, and stripping it would take the documentation out of the
+# package people install.
+
+/tests           export-ignore
+/.github         export-ignore
+/phpunit.xml     export-ignore
+/phpstan.neon    export-ignore
+/.gitignore      export-ignore
+/.gitattributes  export-ignore
