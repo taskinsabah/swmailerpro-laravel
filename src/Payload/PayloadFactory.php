@@ -59,8 +59,34 @@ class PayloadFactory
         }
 
         // Reply-To
+        //
+        // The gateway's schema takes a single address (validators/schemas.ts:168
+        // `reply_to: emailAddressSchema.optional()`), but RFC 5322 defines
+        // Reply-To as an address LIST and Laravel's replyTo() happily takes an
+        // array. Keeping [0] and dropping the rest reported success while the
+        // "and reply to sales too" the application asked for never reached the
+        // recipient.
+        //
+        // One address still goes in the schema field — that path is proven and
+        // unchanged. More than one is written as a single Reply-To header
+        // instead, which is the same wire the gateway itself uses for reply_to
+        // on the SMTP2GO path (smtp2go.provider.ts:333-336 pushes it into
+        // custom_headers) and is forwarded as body.headers on the MailChannels
+        // path. Never both: they open the same header, and two Reply-To headers
+        // in one message is not a longer list, it is a broken message.
+        $replyToHeader = null;
         if ($replyTo = $email->getReplyTo()) {
-            $payload['reply_to'] = $this->formatAddress($replyTo[0]);
+            if (count($replyTo) === 1) {
+                $payload['reply_to'] = $this->formatAddress($replyTo[0]);
+            } else {
+                // toString() quotes and escapes the display name but leaves it
+                // raw UTF-8 — the same rule headerBody() follows, because the
+                // provider is the one that MIME-encodes.
+                $replyToHeader = implode(', ', array_map(
+                    fn (Address $address) => $address->toString(),
+                    $replyTo,
+                ));
+            }
         }
 
         // Content — Text
@@ -109,6 +135,34 @@ class PayloadFactory
                     $entry['content_id'] = $attachment->getFilename();
                 }
 
+                // Only one of the two fields survives the trip on the SMTP2GO
+                // path: the gateway maps inline parts to `inlines` and copies
+                // filename/fileblob/mimetype only (smtp2go.provider.ts:320-324),
+                // so content_id is gone and SMTP2GO keys the part by its
+                // FILENAME. Laravel's embed() stamps a generated cid
+                // ("abc@symfony") into the HTML while the filename stays
+                // "logo.png", so cid:abc@symfony resolved to nothing and the
+                // image showed up broken. Making the filename BE the cid is the
+                // only fix available from this side, and it costs MailChannels
+                // nothing: it receives the attachment verbatim
+                // (mailchannels.provider.ts:232) and still resolves by
+                // content_id, which is unchanged. A filename is what the reader
+                // sees for a file; an inline image is not shown as one.
+                //
+                // Image parts only. The gateway decides whether a file is
+                // blocked by reading the extension off the filename we send,
+                // and a generated cid ("abc@symfony") has no extension at all —
+                // so renaming every inline part would walk an inline
+                // "kurulum.bat" straight past a check that refuses it today.
+                // embed()/embedData() exists for images; an inline non-image is
+                // already broken on the SMTP2GO path, so leaving its filename
+                // alone regresses nothing.
+                if ($disposition === 'inline'
+                    && isset($entry['content_id'])
+                    && str_starts_with($entry['type'], 'image/')) {
+                    $entry['filename'] = $entry['content_id'];
+                }
+
                 $payload['attachments'][] = $entry;
             }
         }
@@ -155,8 +209,17 @@ class PayloadFactory
             $headers->remove('X-SwMailerPro-Data');
         }
 
-        // Template kullanılıyorsa content opsiyonel
-        if ($templateId !== null && empty($payload['content'])) {
+        // Template kullanılıyorsa content hiç gönderilmez.
+        //
+        // Eskiden yalnızca content zaten boşken siliniyordu. Oysa gateway
+        // şablonu çözdükten sonra gövdeyi koşulsuz eziyor
+        // (middleware/resolve-template.ts:84 `req.body.content = content;`),
+        // yedek olarak da kullanmıyor: şablon bulunamazsa 404 dönüyor,
+        // içerikle devam etmiyor. Yani gövdesi olan bir Mailable'ın render
+        // edilmiş Blade çıktısı yüklenip atılıyordu — büyük bir HTML mailde
+        // her gönderimde boşa giden yüzlerce kilobayt, ve MAX_BODY_SIZE'a
+        // sayılan bir yük.
+        if ($templateId !== null) {
             unset($payload['content']);
         }
 
@@ -189,6 +252,15 @@ class PayloadFactory
         // X-SwMailerPro-* control headers above have already been removed and
         // never leak to the provider.
         $custom = $this->customHeaders($headers);
+
+        // customHeaders'tan SONRA yazılıyor: mesajın kendi Reply-To'su
+        // DERIVED_HEADERS'ta elendiği için burada çakışacak bir şey yok, ve
+        // uygulamanın elle yazdığı bir Reply-To başlığı da bizim ürettiğimiz
+        // tam listeyi ezmemeli.
+        if ($replyToHeader !== null) {
+            $custom['Reply-To'] = $this->assertNoLineBreak('Reply-To', $replyToHeader);
+        }
+
         if ($custom !== []) {
             $payload['headers'] = $custom;
         }
@@ -215,6 +287,31 @@ class PayloadFactory
         'content-type',
         'content-transfer-encoding',
         'content-disposition',
+    ];
+
+    /**
+     * Headers the gateway refuses outright, with a 400 VALIDATION_ERROR:
+     * "is set by the gateway and cannot be supplied by the caller"
+     * (validators/schemas.ts:92 FORBIDDEN_HEADER_NAMES).
+     *
+     * These are NOT in DERIVED_HEADERS on purpose. Quietly deleting them would
+     * be the tidier diff and the wrong one: Resent-From and Resent-Sender are
+     * the whole record of who forwarded a message and when, and DKIM-Signature
+     * is a claim about the bytes — dropping either turns a mail the application
+     * built into a different mail, and nobody finds out. Silent removal is the
+     * bug this package keeps being fixed for.
+     *
+     * So we refuse, here, before the upload: the same 400 arrives as a readable
+     * message naming the header instead of an opaque failure after the whole
+     * payload has been sent. The other side of FORBIDDEN_HEADER_NAMES (from,
+     * sender, return-path, to, cc, bcc, subject, date, message-id) is in
+     * DERIVED_HEADERS above because the payload already carries those values —
+     * they are duplicated, not lost.
+     */
+    private const REJECTED_HEADERS = [
+        'resent-from',
+        'resent-sender',
+        'dkim-signature',
     ];
 
     /**
@@ -316,6 +413,18 @@ class PayloadFactory
 
             if (in_array($name, self::DERIVED_HEADERS, true)) {
                 continue;
+            }
+
+            if (in_array($name, self::REJECTED_HEADERS, true)) {
+                throw new SwMailerProException(sprintf(
+                    'SwMailerPro: "%s" başlığını gateway çağırandan kabul etmiyor ve isteği '
+                    . '400 VALIDATION_ERROR ile reddediyor. Başlığı sessizce çıkarmıyoruz: '
+                    . 'Resent-* bir mesajın kim tarafından yeniden gönderildiğini, '
+                    . 'DKIM-Signature de gövdenin imzasını taşır; ikisini de haber vermeden '
+                    . 'silmek uygulamanın kurduğundan başka bir mesaj göndermek olurdu. '
+                    . 'Başlığı mesajdan kaldırın. İstek gönderilmedi.',
+                    $header->getName(),
+                ));
             }
 
             // Kontrol başlıkları yukarıda tüketiliyor; bu, biri gözden kaçarsa

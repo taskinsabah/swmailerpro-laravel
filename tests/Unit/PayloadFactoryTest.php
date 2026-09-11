@@ -86,6 +86,57 @@ class PayloadFactoryTest extends TestCase
     }
 
     #[Test]
+    public function from_email_sends_every_reply_to_as_one_header(): void
+    {
+        // Gateway'in şeması tek adres alıyor; ikinci adres eskiden sessizce
+        // düşüyordu. Hepsi tek bir Reply-To başlığına yazılıyor.
+        $email = $this->makeEmail()->replyTo(
+            'destek@example.com',
+            new Address('satis@example.com', 'Satış'),
+        );
+
+        $payload = $this->factory->fromEmail($email);
+
+        $this->assertArrayNotHasKey('reply_to', $payload);
+        $this->assertSame(
+            'destek@example.com, "Satış" <satis@example.com>',
+            $payload['headers']['Reply-To'],
+        );
+    }
+
+    #[Test]
+    public function from_email_does_not_send_reply_to_twice(): void
+    {
+        // Aynı başlığı hem reply_to alanı hem headers açarsa mesajda iki
+        // Reply-To olur; bu daha uzun bir liste değil, bozuk bir mesajdır.
+        $single = $this->factory->fromEmail($this->makeEmail()->replyTo('destek@example.com'));
+        $this->assertArrayNotHasKey('Reply-To', $single['headers'] ?? []);
+
+        $many = $this->factory->fromEmail(
+            $this->makeEmail()->replyTo('destek@example.com', 'satis@example.com')
+        );
+        $this->assertArrayNotHasKey('reply_to', $many);
+    }
+
+    #[Test]
+    public function from_email_rejects_headers_the_gateway_refuses(): void
+    {
+        // schemas.ts FORBIDDEN_HEADER_NAMES bunlara 400 VALIDATION_ERROR
+        // veriyor. Sessizce silmek yerine, yüklemeden önce söylüyoruz.
+        foreach (['Resent-From', 'Resent-Sender', 'DKIM-Signature'] as $name) {
+            $email = $this->makeEmail()->text('gövde');
+            $email->getHeaders()->addTextHeader($name, 'v=1; d=example.com');
+
+            try {
+                $this->factory->fromEmail($email);
+                $this->fail("{$name} başlığı sessizce geçti.");
+            } catch (SwMailerProException $e) {
+                $this->assertStringContainsString($name, $e->getMessage());
+            }
+        }
+    }
+
+    #[Test]
     public function from_email_maps_subject(): void
     {
         $email = $this->makeEmail();
@@ -206,16 +257,18 @@ class PayloadFactoryTest extends TestCase
     }
 
     #[Test]
-    public function from_email_keeps_content_when_template_with_body(): void
+    public function from_email_drops_content_when_template_with_body(): void
     {
-        $email = $this->makeEmail()->html('<p>Fallback</p>');
+        // Gövde bir yedek değil: gateway şablonu çözünce content'i koşulsuz
+        // eziyor (resolve-template.ts:84). Yüklemek yalnızca bant genişliği
+        // harcıyordu.
+        $email = $this->makeEmail()->html('<p>Fallback</p>')->text('düz metin');
         $email->getHeaders()->addTextHeader('X-SwMailerPro-Template', 'tpl_with_body');
 
         $payload = $this->factory->fromEmail($email);
 
         $this->assertEquals('tpl_with_body', $payload['template_id']);
-        $this->assertArrayHasKey('content', $payload);
-        $this->assertNotEmpty($payload['content']);
+        $this->assertArrayNotHasKey('content', $payload);
     }
 
     #[Test]

@@ -6,6 +6,7 @@ use PHPUnit\Framework\Attributes\Test;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use SabahWeb\SwMailerPro\Tests\TestCase;
+use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Header\ParameterizedHeader;
 
@@ -276,5 +277,100 @@ class PayloadFidelityTest extends TestCase
         $payload = $this->factory()->fromEmail($email);
 
         $this->assertSame(['name' => 'Ayşe'], $payload['template_data']);
+    }
+
+    #[Test]
+    public function an_inline_part_is_named_after_the_cid_the_html_points_at(): void
+    {
+        // The SMTP2GO path drops content_id and keys the inline part by its
+        // filename, so an embed whose cid is "abc@symfony" but whose filename is
+        // "logo.png" renders as a broken image. The two have to agree.
+        $symfonyEmail = $this->email();
+        $message = new \Illuminate\Mail\Message($symfonyEmail);
+
+        $reference = $message->embedData('binary-image-bytes', 'logo.png', 'image/png');
+
+        $payload = $this->factory()->fromEmail($symfonyEmail);
+        $attachment = $payload['attachments'][0];
+
+        $this->assertSame($reference, 'cid:' . $attachment['content_id']);
+        $this->assertSame($attachment['content_id'], $attachment['filename']);
+        // MailChannels resolves by content_id and must keep working.
+        $this->assertNotSame('', $attachment['content_id']);
+        $this->assertSame('image/png', $attachment['type']);
+    }
+
+    #[Test]
+    public function a_regular_attachment_keeps_its_own_filename(): void
+    {
+        // Yalnızca inline parçalar yeniden adlandırılıyor; alıcının kaydettiği
+        // dosyanın adı mesajın anlamının parçası.
+        $email = $this->email();
+        $email->attach('rapor-icerigi', 'rapor.pdf', 'application/pdf');
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame('rapor.pdf', $payload['attachments'][0]['filename']);
+    }
+
+    #[Test]
+    public function an_inline_part_that_is_not_an_image_keeps_its_extension(): void
+    {
+        // Inline parçanın adını cid yapmak yalnızca görseller için doğru. Cid'in
+        // uzantısı yok; gateway ise engelli dosyayı dosya adının uzantısından
+        // tanıyor. Her inline parçayı yeniden adlandırmak, bugün 400 ile
+        // reddedilen bir .bat'ı o kontrolün yanından geçirirdi.
+        $email = $this->email();
+        $email->embed('@echo off', 'kurulum.bat', 'text/plain');
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame('kurulum.bat', $payload['attachments'][0]['filename']);
+    }
+
+    #[Test]
+    public function every_reply_to_address_reaches_the_gateway(): void
+    {
+        // reply_to tek adres kabul ediyor; ikincisi ve sonrası eskiden sessizce
+        // düşüyor, gönderim yine başarılı raporlanıyordu.
+        $email = $this->email()->replyTo(
+            new Address('destek@example.com', 'Destek'),
+            new Address('satis@example.com', 'Satış'),
+        );
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertArrayNotHasKey('reply_to', $payload);
+        $this->assertSame(
+            '"Destek" <destek@example.com>, "Satış" <satis@example.com>',
+            $payload['headers']['Reply-To'],
+        );
+    }
+
+    #[Test]
+    public function a_single_reply_to_still_uses_the_schema_field(): void
+    {
+        $email = $this->email()->replyTo(new Address('destek@example.com', 'Destek'));
+
+        $payload = $this->factory()->fromEmail($email);
+
+        $this->assertSame('destek@example.com', $payload['reply_to']['email']);
+        $this->assertSame('Destek', $payload['reply_to']['name']);
+        // İki alan birden gitmemeli: ikisi de aynı başlığı açıyor.
+        $this->assertArrayNotHasKey('Reply-To', $payload['headers'] ?? []);
+    }
+
+    #[Test]
+    public function a_header_the_gateway_refuses_stops_the_send_instead_of_vanishing(): void
+    {
+        // Gateway bunlara 400 VALIDATION_ERROR veriyor. Sessizce çıkarmak,
+        // iletilen mesajın kimin tarafından yeniden gönderildiğini silmek olurdu.
+        $email = $this->email();
+        $email->getHeaders()->addTextHeader('Resent-From', 'ilk-gonderen@example.com');
+
+        $this->expectException(SwMailerProException::class);
+        $this->expectExceptionMessageMatches('/Resent-From/');
+
+        $this->factory()->fromEmail($email);
     }
 }
