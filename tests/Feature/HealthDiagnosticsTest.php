@@ -150,4 +150,50 @@ class HealthDiagnosticsTest extends TestCase
             ->expectsOutputToContain('ölü mektup kutusunda')
             ->assertExitCode(0);
     }
+
+    // ─── Eksik konfigürasyon ────────────────────────────────────────
+    //
+    // The command used to take the client as a handle() parameter, so the
+    // container built it during method injection and the ConfigurationException
+    // it throws escaped the command entirely. A fresh install — config
+    // published, key not set yet — answered the diagnostic command with a stack
+    // trace. These tests hold the command to the opposite: name the env var,
+    // exit non-zero, and never reach the network.
+
+    #[Test]
+    public function a_missing_key_is_reported_instead_of_thrown(): void
+    {
+        config()->set('swmailerpro.key', '');
+
+        // Beklentiler ayrı satırlara bakar: expectsOutputToContain her
+        // beklentiyi tek bir yazma çağrısıyla eşleştirir, aynı satırdaki iki
+        // parça birlikte aranamaz.
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('SwMailerPro yapılandırması eksik: SWMAILERPRO_KEY tanımlı değil.')
+            ->expectsOutputToContain('SWMAILERPRO_KEY=')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_missing_url_is_reported_instead_of_thrown(): void
+    {
+        config()->set('swmailerpro.url', '');
+
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('SWMAILERPRO_URL tanımlı değil.')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_missing_key_never_reaches_the_gateway(): void
+    {
+        // Http::preventStrayRequests() is active, so an unfaked request would
+        // throw. Asserting nothing was sent proves the command stopped at the
+        // configuration check rather than dialling a gateway it cannot address.
+        config()->set('swmailerpro.key', '');
+
+        $this->artisan('swmailerpro:health')->assertExitCode(1);
+
+        Http::assertNothingSent();
+    }
 }

@@ -3,8 +3,10 @@
 namespace SabahWeb\SwMailerPro\Commands;
 
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Config;
 use SabahWeb\SwMailerPro\Client\SwMailerProClient;
 use SabahWeb\SwMailerPro\Exceptions\ApiException;
+use SabahWeb\SwMailerPro\Exceptions\ConfigurationException;
 use SabahWeb\SwMailerPro\Exceptions\SwMailerProException;
 
 class HealthCommand extends Command
@@ -13,8 +15,14 @@ class HealthCommand extends Command
 
     protected $description = 'SwMailerPro gateway sağlık durumunu kontrol eder';
 
-    public function handle(SwMailerProClient $client): int
+    public function handle(): int
     {
+        $client = $this->resolveClient();
+
+        if ($client === null) {
+            return self::FAILURE;
+        }
+
         $this->info('SwMailerPro gateway\'e bağlanılıyor...');
         $this->newLine();
 
@@ -76,6 +84,71 @@ class HealthCommand extends Command
         $this->warn("Gateway durumu: {$status}");
 
         return self::FAILURE;
+    }
+
+    /**
+     * İstemciyi container'dan çözer; konfigürasyon eksikse nedenini yazıp null döner.
+     *
+     * The client used to be a handle() parameter, so the container built it
+     * during method injection — before a single line of handle() ran. The
+     * ConfigurationException the singleton throws on an empty url or key
+     * therefore flew straight past the try/catch below and out of the command
+     * as an uncaught error: a developer who had published the config but not
+     * yet set SWMAILERPRO_KEY got a stack trace from the one command whose
+     * entire job is to diagnose that situation. Resolving it here, inside the
+     * command's own control flow, is what makes that catch reachable at all.
+     */
+    protected function resolveClient(): ?SwMailerProClient
+    {
+        try {
+            return $this->laravel->make(SwMailerProClient::class);
+        } catch (ConfigurationException $e) {
+            $this->reportMissingConfiguration($e);
+
+            return null;
+        }
+    }
+
+    /**
+     * Eksik konfigürasyonu, hangi env değerinin eksik olduğunu söyleyerek yazar.
+     *
+     * The exception's own message lists both variables whichever one is
+     * missing. Reading the config back tells the developer which line to add.
+     */
+    protected function reportMissingConfiguration(ConfigurationException $e): void
+    {
+        $missing = [];
+
+        if ($this->configString('swmailerpro.url') === '') {
+            $missing['SWMAILERPRO_URL'] = 'https://gateway.alan-adiniz.com';
+        }
+
+        if ($this->configString('swmailerpro.key') === '') {
+            $missing['SWMAILERPRO_KEY'] = 'tenant-api-anahtariniz';
+        }
+
+        if ($missing === []) {
+            $this->error($e->getMessage());
+
+            return;
+        }
+
+        $this->error('SwMailerPro yapılandırması eksik: ' . implode(' ve ', array_keys($missing)) . ' tanımlı değil.');
+        $this->line('  .env dosyanıza ekleyin:');
+
+        foreach ($missing as $name => $example) {
+            $this->line("    {$name}={$example}");
+        }
+    }
+
+    /**
+     * Config değerleri mixed; string olmayan bir ayar burada boş sayılır.
+     */
+    protected function configString(string $key): string
+    {
+        $value = Config::get($key);
+
+        return is_string($value) ? $value : '';
     }
 
     /**
