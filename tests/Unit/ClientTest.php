@@ -184,4 +184,37 @@ class ClientTest extends TestCase
 
         Http::assertSent(fn ($r) => $r->url() === 'https://gw.example.com/api/v1/health');
     }
+
+    // ─── Redirects ──────────────────────────────────────────────────
+
+    #[Test]
+    public function requests_never_follow_a_redirect(): void
+    {
+        Http::fake(function ($request, array $options) {
+            $this->assertFalse($options['allow_redirects']);
+
+            return Http::response(['success' => true, 'data' => ['status' => 'queued']], 202);
+        });
+
+        $this->client->sendAsync(['from' => ['email' => 'a@b.com'], 'transactional' => true], 'key-1');
+
+        Http::assertSentCount(1);
+    }
+
+    #[Test]
+    public function a_redirect_is_reported_instead_of_carrying_the_api_key_elsewhere(): void
+    {
+        Http::fake([
+            'test-gateway.example.com/api/v1/email/send' => Http::response('', 302, ['Location' => 'https://elsewhere.example.com/api/v1/email/send']),
+        ]);
+
+        try {
+            $this->client->send(['from' => ['email' => 'a@b.com'], 'transactional' => true], 'key-2');
+            $this->fail('A redirect was followed.');
+        } catch (ApiException $exception) {
+            $this->assertSame(302, $exception->httpStatus);
+        }
+
+        Http::assertSentCount(1);
+    }
 }

@@ -210,6 +210,17 @@ class SwMailerProClient
         $pending = Http::withHeaders($headers)
             ->timeout($this->timeout)
             ->connectTimeout($this->connectTimeout)
+            // Guzzle follows up to five redirects by default and carries our
+            // headers to wherever the 3xx points — X-Api-Key and the whole
+            // message with it. A gateway URL that has been changed, hijacked or
+            // merely misconfigured behind a proxy would therefore hand the
+            // tenant key and the mail body to a host we never chose. The
+            // gateway has no redirecting endpoint, so a 3xx is already an
+            // answer worth reporting rather than following; the retry closure
+            // below is written for exactly that (Laravel hands it null for a
+            // 3xx, which it treats as "do not retry"), and the 3xx then leaves
+            // here as an ApiException the caller can see.
+            ->withoutRedirecting()
             ->retry(
                 max(1, $this->retry['times'] ?? 2),
                 function (int $attempt, \Throwable $e) use ($base): int {
