@@ -60,6 +60,9 @@ class HealthCommand extends Command
         $this->renderProviders($data);
         $queueProblem = $this->renderQueue($data);
         $this->renderSuppression($data);
+        $suppressionProblem = $this->suppressionUnreadable($data)
+            ? 'Engelli adres listesi okunamadı: gateway, gönderimde alıcıları süzdüğü tabloyu okuyamıyor.'
+            : null;
 
         $this->newLine();
 
@@ -67,7 +70,7 @@ class HealthCommand extends Command
         // "mail is not moving", even while the API answers healthy — so they
         // fail the command rather than being printed and scrolled past. So does
         // a gateway that cannot read its own state: not knowing is not health.
-        foreach ([$schemaProblem, $queueProblem] as $problem) {
+        foreach ([$schemaProblem, $queueProblem, $suppressionProblem] as $problem) {
             if ($problem !== null) {
                 $this->error($problem);
 
@@ -297,12 +300,40 @@ class HealthCommand extends Command
     }
 
     /**
+     * Engelli adres satırını yazar.
+     *
+     * void kalıyor: v1.0.0'dan beri protected, yani dönüş tipini değiştirmek onu
+     * ezen bir alt sınıfı bir yama sürümünde fatal'a düşürürdü. Sorunu handle()
+     * suppressionUnreadable() ile ayrıca soruyor.
+     *
      * @param array<string, mixed> $data
      */
     protected function renderSuppression(array $data): void
     {
+        if ($this->suppressionUnreadable($data)) {
+            $this->line('  Engelli adres: <fg=red>okunamadı</>');
+
+            return;
+        }
+
         if (isset($data['suppression_list_size'])) {
             $this->line("  Engelli adres: {$data['suppression_list_size']}");
         }
+    }
+
+    /**
+     * Gateway engelli adres listesini okuyamamış mı.
+     *
+     * Okuma patladığında gateway alanı null gönderiyor ve status'ü yine
+     * 'healthy' bırakıyor — status yalnızca sağlayıcılara bakıyor. isset() null'ı
+     * "alan yok" saydığı için satır hiç basılmıyor, komut da "Gateway sağlıklı."
+     * deyip 0 ile çıkıyordu. Alanın hiç olmaması başka bir şey: bu alanı
+     * göndermeyen bir gateway'de söylenecek bir şey yok.
+     *
+     * @param array<string, mixed> $data
+     */
+    protected function suppressionUnreadable(array $data): bool
+    {
+        return array_key_exists('suppression_list_size', $data) && $data['suppression_list_size'] === null;
     }
 }

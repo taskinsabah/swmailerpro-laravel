@@ -14,13 +14,17 @@ use SabahWeb\SwMailerPro\Tests\TestCase;
  */
 class HealthDiagnosticsTest extends TestCase
 {
-    /** @param array<string, mixed> $overrides */
-    private function fakeHealth(array $overrides = []): void
+    /**
+     * @param array<string, mixed> $overrides
+     * @param list<string> $without Yanıttan tamamen çıkarılacak alanlar — bir alanı
+     *        hiç göndermeyen gateway, onu null gönderenden farklı bir durumdur.
+     */
+    private function fakeHealth(array $overrides = [], array $without = []): void
     {
         Http::fake([
             '*' => Http::response([
                 'success' => true,
-                'data' => array_merge([
+                'data' => array_diff_key(array_merge([
                     'status' => 'healthy',
                     'uptime' => 1234,
                     'version' => '1.0.0',
@@ -35,7 +39,7 @@ class HealthDiagnosticsTest extends TestCase
                     'queue_stats' => ['pending' => 0, 'dead' => 0],
                     'queue_oldest_pending_ms' => 0,
                     'dead_letter_count' => 0,
-                ], $overrides),
+                ], $overrides), array_flip($without)),
             ], 200),
         ]);
     }
@@ -115,6 +119,36 @@ class HealthDiagnosticsTest extends TestCase
         $this->artisan('swmailerpro:health')
             ->expectsOutputToContain('durum okunamadı')
             ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_suppression_list_the_gateway_could_not_read_fails_the_check(): void
+    {
+        // Gateway engelli listesi okuması patladığında alanı null gönderiyor ve
+        // status'ü 'healthy' bırakıyor — status yalnızca sağlayıcılara bakıyor.
+        // isset() null'ı "alan yok" saydığından komut satırı hiç basmıyor,
+        // "Gateway sağlıklı." deyip 0 ile çıkıyordu.
+        $this->fakeHealth(['suppression_list_size' => null]);
+
+        $this->artisan('swmailerpro:health')
+            ->expectsOutputToContain('Engelli adres listesi okunamadı')
+            ->doesntExpectOutputToContain('Gateway sağlıklı.')
+            ->assertExitCode(1);
+    }
+
+    #[Test]
+    public function a_gateway_that_does_not_report_the_suppression_list_still_passes(): void
+    {
+        // Alanın hiç olmaması okunamamasıyla aynı şey değil: onu göndermeyen bir
+        // gateway'de söylenecek bir şey yok. Bu testin kilitlediği şey kontrolün
+        // array_key_exists() olarak kalması — !isset()'e dönerse yok ile null
+        // birbirine karışır ve böyle bir gateway'deki her deploy durur.
+        $this->fakeHealth([], ['suppression_list_size']);
+
+        $this->artisan('swmailerpro:health')
+            ->doesntExpectOutputToContain('Engelli adres')
+            ->expectsOutputToContain('Gateway sağlıklı.')
+            ->assertExitCode(0);
     }
 
     #[Test]

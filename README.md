@@ -412,9 +412,13 @@ Komut şu durumlarda **exit 1** döner — hepsi gateway "healthy" derken maili 
 - **Kuyruk ilerlemiyor**: bekleyen iş var ve en eskisi 5 dakikayı geçmiş (worker durmuş olabilir).
 - **Kuyruk durumu okunamadı**: gateway kuyruğu okuyamadığını bildiriyor. Eskiden bu "bekleyen 0,
   ölü mektup 0" diye yazılıp exit 0 dönüyordu — bilmemek sağlık sayılmaz.
+- **Engelli adres listesi okunamadı**: gateway listeyi okuyamadığını bildiriyor
+  (`suppression_list_size: null`). Gönderim yolu alıcıları aynı tablodan süzüyor; o okuma da
+  patlarsa gönderim 500 ile döner. v1.0.1'e kadar komut bu alanı yok sayıp "Gateway sağlıklı."
+  diyordu.
 
-> Deploy hattınız bu komutu kapı olarak kullanıyorsa: son üç madde yeni. Daha önce sessizce
-> geçen bir gateway artık hattı durdurabilir; amaç budur.
+> Deploy hattınız bu komutu kapı olarak kullanıyorsa: son madde v1.0.2'de eklendi. Daha önce
+> sessizce geçen bir gateway artık hattı durdurabilir; amaç budur.
 
 ### `swmailerpro:test`
 
