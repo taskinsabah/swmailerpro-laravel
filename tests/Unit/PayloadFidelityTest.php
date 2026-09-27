@@ -8,6 +8,7 @@ use SabahWeb\SwMailerPro\Payload\PayloadFactory;
 use SabahWeb\SwMailerPro\Tests\TestCase;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\Exception\RfcComplianceException;
 use Symfony\Component\Mime\Header\ParameterizedHeader;
 
 /**
@@ -241,7 +242,20 @@ class PayloadFidelityTest extends TestCase
     public function a_line_break_in_a_header_name_stops_the_send(): void
     {
         $email = $this->email();
-        $email->getHeaders()->addTextHeader("X-Note\r\nBcc", 'spy@evil.test');
+
+        // symfony/mime'ın yeni yamaları (7.4.19 ve 8.1.7'de ölçüldü) böyle bir
+        // adı başlık kurulurken reddediyor; o zaman durdurulacak bir gönderim
+        // zaten oluşmuyor. 7.4.12 ise kabul ediyor ve paket ^7.4'ün hepsine izin
+        // veriyor — paketin kendi kilidini o sürümlerde prefer-lowest hücreleri
+        // sınıyor. Kurulumu koşulsuz yazmak, yeni Symfony'de testi paketle hiç
+        // ilgisi olmayan bir hatayla düşürüyordu.
+        try {
+            $email->getHeaders()->addTextHeader("X-Note\r\nBcc", 'spy@evil.test');
+        } catch (RfcComplianceException) {
+            $this->addToAssertionCount(1);
+
+            return;
+        }
 
         $this->expectException(SwMailerProException::class);
 

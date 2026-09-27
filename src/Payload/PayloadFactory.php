@@ -435,8 +435,10 @@ class PayloadFactory
 
             $rawName = $header->getName();
 
-            // Symfony başlık adını doğrulamıyor: adının içine CRLF konmuş bir
-            // başlık da kabul ediliyor, ve ad da değer kadar iyi bir enjeksiyon yolu.
+            // Ad da değer kadar iyi bir enjeksiyon yolu. symfony/mime'ın yeni
+            // yamaları CRLF taşıyan bir adı başlık kurulurken reddediyor (7.4.19
+            // ve 8.1.7'de ölçüldü), ama 7.4.12 kabul ediyor ve paket ^7.4'ün
+            // hepsine izin veriyor — kilit o sürümler için duruyor.
             $this->assertNoLineBreak($rawName, $rawName);
 
             $custom[$rawName] = $this->headerBody($header);
