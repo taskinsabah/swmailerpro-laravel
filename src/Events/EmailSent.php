@@ -27,7 +27,11 @@ class EmailSent
          *                   422 döner (ALL_RECIPIENTS_SUPPRESSED ya da
          *                   RESERVED_DOMAIN_RECIPIENTS), yani bu event hiç
          *                   yayınlanmaz — o durumun işareti EmailFailed ve
-         *                   ApiException'dır.
+         *                   ApiException'dır. Kısmi elemede de 422 gelebilir:
+         *                   To alıcılarının hepsi elenmiş ve geriye birden
+         *                   fazla Bcc kalmışsa (NO_TO_RECIPIENT_LEFT). Cc ya da
+         *                   tek bir Bcc kalmışsa To satırını onlar devralır ve
+         *                   mesaj gider.
          */
         public readonly array $suppressedRecipients = [],
     ) {

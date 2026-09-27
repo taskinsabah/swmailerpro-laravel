@@ -487,6 +487,10 @@ class HandleEmailSent
         //                     mesaj kalanlara gitti. Alıcıların TAMAMI elenirse
         //                     gateway 422 döner ve bu event hiç yayınlanmaz;
         //                     o durumu EmailFailed / ApiException ile yakalayın.
+        //                     To alıcılarının hepsi elenirse To satırını Cc
+        //                     alıcıları (Cc yoksa tek Bcc) devralır; geriye
+        //                     birden fazla Bcc kalıyorsa yine 422 döner
+        //                     (NO_TO_RECIPIENT_LEFT).
         //
         // Not: payload'daki ek içerikleri event'e KONULMAZ ('content' => null,
         // yerine 'size_bytes'). Kuyruğa alınmış bir dinleyici event'i serialize
@@ -642,9 +646,10 @@ try {
 
 ### Gateway'in döndürdüğü hata kodları
 
-`$e->errorCode` aşağıdaki değerlerden birini taşır. Liste gateway kodundan
-çıkarıldı; eskiden burada yazan `RATE_LIMIT` gateway'de hiç üretilmeyen bir
-koddur — o kodu bekleyen bir `match`/`switch` hiçbir zaman eşleşmez.
+Gateway'in kendi ürettiği kodlar aşağıda; liste gateway kodundan çıkarıldı.
+SMTP2GO yolunda `$e->errorCode` sağlayıcının kendi kodu da olabilir (tablonun
+altındaki nota bakın). Eskiden burada yazan `RATE_LIMIT` gateway'de hiç
+üretilmeyen bir koddur — o kodu bekleyen bir `match`/`switch` hiçbir zaman eşleşmez.
 
 | Kod | HTTP | Ne oldu |
 |---|---|---|
@@ -654,23 +659,43 @@ koddur — o kodu bekleyen bir `match`/`switch` hiçbir zaman eşleşmez.
 | `TEMPLATE_NOT_FOUND` | 404 | `template_id` bu tenant'ta yok |
 | `TEMPLATE_MISSING_VARIABLES` | 400 | `template_data` zorunlu değişkenleri karşılamıyor |
 | `TEMPLATE_RENDER_ERROR` | 400 | Template render edilirken patladı |
+| `NOT_FOUND` | 404 | İstenen yol gateway'de yok — çoğunlukla `SWMAILERPRO_URL`'in sonunda fazladan bir yol var (ör. `/api`) |
 | `UNAUTHORIZED` | 401 | API anahtarı yok ya da geçersiz |
+| `FORBIDDEN` | 403 | İstek gateway'in kapısından geçemedi: Cloudflare atlanıp sunucuya doğrudan gidildi (`SWMAILERPRO_URL` Cloudflare'deki alan adını değil sunucuyu gösteriyor) ya da tenant'ın IP izin listesi var ve çağıranın IP'si belirlenemedi |
 | `TENANT_NOT_FOUND` | 403 | `from` alan adı hiçbir tenant'a kayıtlı değil |
 | `TENANT_SUSPENDED` | 403 | Tenant askıya alınmış |
 | `SENDER_NOT_AUTHORIZED` | 403 | Gönderici (`from`, `envelope_from` ya da personalization `from`) bu tenant'ın alan adında değil |
 | `API_KEY_TENANT_MISMATCH` | 403 | Anahtar başka bir tenant'a ait |
 | `IP_NOT_ALLOWED` | 403 | Çağıran IP tenant'ın allowlist'inde değil |
-| `PAYLOAD_TOO_LARGE` | 413 | Gövde 20 MB'ı, ya da async kuyrukta 2 MiB'ı aşıyor |
+| `PAYLOAD_TOO_LARGE` | 413 | Gövde 20 MB'ı, async kuyrukta 2 MiB'ı ya da tenant'ın veya sağlayıcının mesaj boyutu sınırını aşıyor |
 | `ATTACHMENT_TOO_LARGE` | 413 | Tek ek ya da eklerin toplamı tavanı aşıyor |
+| `CHARSET_UNSUPPORTED` / `ENCODING_UNSUPPORTED` | 415 | Gövde okunamadı: UTF-8 dışı karakter seti ya da desteklenmeyen `Content-Encoding`. Paket her zaman sıkıştırılmamış UTF-8 JSON gönderir; bu kodu görmek aradaki bir katmanın isteği değiştirdiğini gösterir |
 | `ALL_RECIPIENTS_SUPPRESSED` | 422 | Alıcıların tamamı suppression listesinde |
 | `RESERVED_DOMAIN_RECIPIENTS` | 422 | Alıcıların tamamı RFC 2606/6761 rezerve alan adında (`example.com`, `*.test`, …) |
-| `RATE_LIMITED` / `RATE_LIMIT_EXCEEDED` | 429 | İstek hızı sınırı; `Retry-After` taşır |
+| `NO_TO_RECIPIENT_LEFT` | 422 | Bir personalization'ın bütün To alıcıları elendi ve kalanlar birbirine gösterilmeden To satırına alınamıyor (Cc yok, birden fazla Bcc var). Hiçbir şey gönderilmez; kimlere gitmediği `details.unsent_recipients` içinde |
+| `MULTIPLE_PERSONALIZATIONS_UNSUPPORTED` | 422 | Tenant'ın sağlayıcısı SMTP2GO ve istekte birden fazla personalization var — SMTP2GO'da her istek tek mesajdır, alıcılar birbirini görürdü. Transport her zaman tek personalization gönderir; bunu yalnızca facade'e verilen ham payload tetikler |
+| `TOO_MANY_RECIPIENTS` | 422 | SMTP2GO alan başına (to / cc / bcc) en çok 100 alıcı kabul eder |
+| `SMTP2GO_SEND_FAILED` | 422 | SMTP2GO isteği aldı ama her alıcıyı reddetti; nedenler `details.failures` içinde. Gateway'in eski sürümleri bunu 502 `INTERNAL_ERROR` olarak döndürüyordu ve paket boşuna tekrar deniyordu |
+| `RATE_LIMIT_EXCEEDED` | 429 | Gateway'in IP başına istek hızı sınırı; `Retry-After` taşır |
 | `QUOTA_EXCEEDED` | 429 | Tenant kotası doldu; `Retry-After` taşır |
+| `RATE_LIMITED` | 429 | Sağlayıcı hız sınırına takıldı ve yedek sağlayıcı da gönderemedi. `Retry-After` **taşımaz**, bu yüzden paket tekrar denemez |
 | `PROVIDER_TIMEOUT` / `PROVIDER_NETWORK_ERROR` / `PROVIDER_SERVER_ERROR` | 502 | Sağlayıcıya ulaşılamadı ya da sağlayıcı 5xx döndü (gateway sağlayıcının 5xx'ini 502'ye çevirir) |
-| `PROVIDER_AUTH_ERROR` / `PROVIDER_CLIENT_ERROR` | 502 | Sağlayıcı isteği reddetti |
-| `PROVIDER_NOT_CONFIGURED` | 502 | Hiçbir sağlayıcı yapılandırılmamış |
-| `SERVICE_UNAVAILABLE` / `CIRCUIT_BREAKER_OPEN` | 503 | Circuit breaker açık; `Retry-After` taşır. Gateway kodu hatanın hangi katmandan geldiğine göre ikisinden birini döndürür — ikisini de karşılayın |
-| `INTERNAL_ERROR` | 500 | Beklenmeyen gateway hatası |
+| `PROVIDER_AUTH_ERROR` | 401 / 403 | Sağlayıcı isteği yetki gerekçesiyle reddetti: gateway'in sağlayıcı kimlik bilgisi geçersiz ya da (MailChannels'ta) gönderen alan adı yetkili değil. Sizin API anahtarınızla ilgisi yok |
+| `PROVIDER_CLIENT_ERROR` | sağlayıcının 4xx'i | Sağlayıcı bu mesajı reddetti (çoğunlukla 400); nedeni `details` içinde. Tekrar denemek sonucu değiştirmez |
+| `PROVIDER_NOT_CONFIGURED` | 502 | Tenant'a atanmış sağlayıcı gateway'de yapılandırılmamış |
+| `CIRCUIT_BREAKER_OPEN` | 503 | Sağlayıcının circuit breaker'ı açık ve yedeğe geçilemedi. `Retry-After` **taşımaz**; paket normal backoff ile tekrar dener |
+| `SERVICE_UNAVAILABLE` | 503 | Circuit breaker açık; `Retry-After` taşır. Gateway, hatanın hangi katmandan geldiğine göre bunu ya da `CIRCUIT_BREAKER_OPEN`'ı döndürür — ikisini de karşılayın |
+| `INTERNAL_ERROR` | 500 | Beklenmeyen gateway hatası; sağlayıcı katmanında oluştuysa 502 |
+
+**Sağlayıcı hatalarında HTTP kodu kuralı.** Sağlayıcının 4xx'i olduğu gibi iletilir (413
+dahil); 5xx ile hiç yanıt alınamayan hatalar (zaman aşımı, ağ) 502 olur; circuit breaker
+503'tür. Yani `PROVIDER_*` kodlarının hepsi 502 değildir. Bir hatanın kalıcı mı geçici mi
+olduğuna `httpStatus` ile karar verin — paketin retry kuralı da buna bakar.
+
+**SMTP2GO yolunda sağlayıcının kendi kodu.** SMTP2GO yanıtında kendi hata kodunu verdiyse
+`errorCode` o olur (ör. `E_ApiResponseCodes.NON_VALIDATING_IN_PAYLOAD`); HTTP kodu yukarıdaki
+kurala uyar. `errorCode` üzerine kurulan bir `match`'e bu yüzden her zaman bir varsayılan kol
+koyun.
 
 Bu listenin dışında iki kodu paketin kendisi üretir: gateway JSON yerine başka bir
 şey döndürdüğünde (araya giren bir proxy ya da oturum sayfası) `INVALID_RESPONSE`,
@@ -729,7 +754,8 @@ etmedi), bu durumda gateway de 202 döner.
 
 Alıcıların bir kısmı elenmişse `data.suppressed_recipients` (dizi) eklenir ve
 `message` "Email sent (some recipients were suppressed)" olur. Alıcıların tamamı
-elenirse başarılı yanıt hiç gelmez — 422 döner.
+elenirse başarılı yanıt hiç gelmez — 422 döner. Kısmi elemede de 422 gelebilir: To
+alıcılarının hepsi elenmiş ve geriye birden fazla Bcc kalmışsa (`NO_TO_RECIPIENT_LEFT`).
 
 ### Başarılı Yanıt — asenkron (`/send-async`, HTTP 202)
 
@@ -834,9 +860,10 @@ kayıtlarını açmak demek. Bunlar operatör uçlarıdır.
 
 Uygulamanın gerçekte ihtiyaç duyduğu şey — "bu adrese gönderilebilir mi" — gönderim
 yolunda zaten karşılanıyor: gateway alıcıları tenant bazlı süzüyor, kısmi elemede
-kalanları `EmailSent::$suppressedRecipients` ile bildiriyor, tamamı elenirse 422 ile
-reddediyor. Tenant-kapsamlı bir okuma ucu istenirse o iş gateway tarafında, her
-tenant'ın yalnız kendi kayıtlarını görebileceği bir yetkilendirmeyle yapılmalı.
+kalanları `EmailSent::$suppressedRecipients` ile bildiriyor, tamamı elenirse ya da
+kalanlar To satırına alınamıyorsa 422 ile reddediyor. Tenant-kapsamlı bir okuma ucu
+istenirse o iş gateway tarafında, her tenant'ın yalnız kendi kayıtlarını görebileceği bir
+yetkilendirmeyle yapılmalı.
 
 ---
 
